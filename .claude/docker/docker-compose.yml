@@ -1,0 +1,161 @@
+# Cognee AI Memory Layer - Second-Brain Repository
+#
+# This Cognee stack is SPECIFIC to the second-brain repository.
+# Each repository should have its own Cognee instance to prevent cross-contamination.
+#
+# Location: .claude/docker/docker-compose.yml
+#
+# Usage:
+#   cd /path/to/second-brain
+#   .claude/scripts/cognee-local.sh up
+#   .claude/scripts/cognee-local.sh down
+#   .claude/scripts/cognee-local.sh logs
+
+name: second-brain-cognee
+
+services:
+  # =============================================================================
+  # COGNEE DATABASE - PostgreSQL with pgvector extension
+  # Stores document metadata, chunks, and vector embeddings
+  # =============================================================================
+  cognee-db:
+    image: pgvector/pgvector:pg17
+    container_name: second-brain-cognee-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=cognee
+      - POSTGRES_PASSWORD=${COGNEE_DB_PASSWORD:-cognee}
+      - POSTGRES_DB=cognee
+    volumes:
+      - cognee-db-data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"  # Expose on 5433 to avoid conflicts with local PostgreSQL
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cognee"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # =============================================================================
+  # COGNEE REDIS - Cache and job queue
+  # Handles async processing and session caching
+  # =============================================================================
+  cognee-redis:
+    image: redis:7-alpine
+    container_name: second-brain-cognee-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - cognee-redis-data:/data
+    ports:
+      - "6380:6379"  # Expose on 6380 to avoid conflicts with local Redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  # =============================================================================
+  # COGNEE NEO4J - Knowledge graph database
+  # Stores entity relationships and enables graph traversal
+  # =============================================================================
+  cognee-neo4j:
+    image: neo4j:5
+    container_name: second-brain-cognee-neo4j
+    restart: unless-stopped
+    environment:
+      - NEO4J_AUTH=neo4j/${COGNEE_NEO4J_PASSWORD:-neo4j_password}
+      - NEO4J_server_memory_heap_initial__size=512m
+      - NEO4J_server_memory_heap_max__size=1G
+      - NEO4J_server_memory_pagecache_size=512m
+      # Enable APOC plugin (required by Cognee)
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+      - NEO4J_dbms_security_procedures_allowlist=apoc.*
+    volumes:
+      - cognee-neo4j-data:/data
+      - cognee-neo4j-logs:/logs
+    ports:
+      - "7474:7474"  # Web UI
+      - "7687:7687"  # Bolt protocol
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 | grep -qi neo4j || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+
+  # =============================================================================
+  # COGNEE - Main service (REST API and processing engine)
+  # Provides semantic search, knowledge graph, and AI-powered insights
+  # =============================================================================
+  cognee:
+    image: cognee/cognee:latest
+    container_name: second-brain-cognee
+    restart: unless-stopped
+    depends_on:
+      cognee-db:
+        condition: service_healthy
+      cognee-redis:
+        condition: service_healthy
+      cognee-neo4j:
+        condition: service_healthy
+    environment:
+      # Relational Database (PostgreSQL)
+      - DB_PROVIDER=postgres
+      - DB_HOST=cognee-db
+      - DB_PORT=5432
+      - DB_NAME=cognee
+      - DB_USERNAME=cognee
+      - DB_PASSWORD=${COGNEE_DB_PASSWORD:-cognee}
+      - RELATIONAL_DATABASE=postgresql://cognee:${COGNEE_DB_PASSWORD:-cognee}@cognee-db:5432/cognee
+      # Vector Database (pgvector)
+      - VECTOR_DB_PROVIDER=pgvector
+      - VECTOR_DB_URL=postgresql://cognee:${COGNEE_DB_PASSWORD:-cognee}@cognee-db:5432/cognee
+      - VECTOR_DB_HOST=cognee-db
+      - VECTOR_DB_PORT=5432
+      - VECTOR_DB_NAME=cognee
+      - VECTOR_DB_USERNAME=cognee
+      - VECTOR_DB_PASSWORD=${COGNEE_DB_PASSWORD:-cognee}
+      # Graph Database (Neo4j)
+      - GRAPH_DATABASE_PROVIDER=neo4j
+      - GRAPH_DATABASE_URL=bolt://cognee-neo4j:7687
+      - GRAPH_DATABASE_USERNAME=neo4j
+      - GRAPH_DATABASE_PASSWORD=${COGNEE_NEO4J_PASSWORD:-neo4j_password}
+      # Redis
+      - REDIS_URL=redis://cognee-redis:6379/0
+      # LLM & Embeddings
+      - LLM_API_KEY=${OPENAI_API_KEY}
+      - LLM_MODEL=${COGNEE_LLM_MODEL:-gpt-4}
+      - EMBEDDING_MODEL=${COGNEE_EMBEDDING_MODEL:-text-embedding-3-small}
+      - EMBEDDING_DIMENSIONS=1536
+      # Authentication (disabled for local development)
+      - REQUIRE_AUTHENTICATION=${COGNEE_REQUIRE_AUTH:-false}
+      - ENABLE_BACKEND_ACCESS_CONTROL=${COGNEE_ACCESS_CONTROL:-false}
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+# =============================================================================
+# VOLUMES - Repository-specific named volumes for data persistence
+# =============================================================================
+volumes:
+  cognee-db-data:
+    name: second-brain-cognee-db
+  cognee-redis-data:
+    name: second-brain-cognee-redis
+  cognee-neo4j-data:
+    name: second-brain-cognee-neo4j
+  cognee-neo4j-logs:
+    name: second-brain-cognee-neo4j-logs
+
+# =============================================================================
+# NETWORKS - Repository-specific bridge network
+# =============================================================================
+networks:
+  default:
+    name: second-brain-cognee
+    driver: bridge

@@ -1,0 +1,19 @@
+{
+  "default": true,
+  // MD013: Line length - Relaxed to accommodate long URLs (Spotify links, etc.)
+  // While 80 chars is ideal for readability, technical content often needs more space
+  "MD013": {
+    "line_length": 180,
+    "heading_line_length": 100,
+    "code_blocks": false,  // Code blocks exempt from line length checks
+    "tables": false        // Tables exempt from line length checks
+  },
+  // MD033: Allow specific HTML elements for Obsidian compatibility
+  "MD033": {
+    "allowed_elements": ["br", "details", "summary"]
+  },
+  // MD041: First line doesn't need to be heading (allows YAML frontmatter)
+  "MD041": false,
+  // MD060: Table column style - Disabled due to inconsistent enforcement
+  "MD060": false
+}
