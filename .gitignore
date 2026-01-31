@@ -17,6 +17,10 @@ private/
 .env.local
 .env.cognee
 
+# Local settings (per-machine)
+*.local.json
+.claude/settings.local.json
+
 # Cognee local data
 /tmp/session-*.txt
 cognee-*.txt
