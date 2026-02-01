@@ -1,6 +1,6 @@
 #!/bin/bash
 # Cognee local development management script
-# Second-Brain Repository - Isolated Instance
+# BTC Algo Trading Repository - Isolated Instance
 
 set -e
 
@@ -11,7 +11,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DOCKER_DIR="$REPO_ROOT/.claude/docker"
 COMPOSE_FILE="$DOCKER_DIR/docker-compose.yml"
 ENV_FILE="$DOCKER_DIR/.env"
-COGNEE_URL="${COGNEE_URL:-http://localhost:8000}"
+COGNEE_URL="${COGNEE_URL:-http://localhost:8001}"
 
 # Colors
 GREEN='\033[0;32m'
@@ -45,20 +45,20 @@ check_compose_file() {
     if [ ! -f "$COMPOSE_FILE" ]; then
         echo -e "${RED}Error: $COMPOSE_FILE not found${NC}"
         echo "Expected location: $COMPOSE_FILE"
-        echo "Make sure you're running this from the second-brain repository"
+        echo "Make sure you're running this from the btc-algo-trading repository"
         exit 1
     fi
     if [ ! -f "$ENV_FILE" ]; then
         echo -e "${RED}Error: $ENV_FILE not found${NC}"
         echo "Expected location: $ENV_FILE"
-        echo "Create .env file with Cognee configuration"
+        echo "Copy .env.example to .env and configure: cp $DOCKER_DIR/.env.example $ENV_FILE"
         exit 1
     fi
 }
 
 cmd_up() {
     check_compose_file
-    echo -e "${BLUE}🚀 Starting Second-Brain Cognee stack...${NC}"
+    echo -e "${BLUE}🚀 Starting BTC Algo Trading Cognee stack...${NC}"
     echo "Repository: $REPO_ROOT"
     echo "Docker files: $DOCKER_DIR"
     echo ""
@@ -73,7 +73,7 @@ cmd_up() {
 
 cmd_down() {
     check_compose_file
-    echo -e "${BLUE}⏹️  Stopping Second-Brain Cognee stack...${NC}"
+    echo -e "${BLUE}⏹️  Stopping BTC Algo Trading Cognee stack...${NC}"
     docker compose -f "$COMPOSE_FILE" down
     echo -e "${GREEN}✓${NC} Services stopped (data preserved)"
 }
@@ -115,21 +115,21 @@ cmd_health() {
     fi
     
     # Check PostgreSQL
-    if docker exec second-brain-cognee-db pg_isready -U cognee > /dev/null 2>&1; then
+    if docker exec btc-algo-cognee-db pg_isready -U cognee > /dev/null 2>&1; then
         echo -e "${GREEN}✓${NC} PostgreSQL: healthy"
     else
         echo -e "${RED}✗${NC} PostgreSQL: unhealthy"
     fi
-    
+
     # Check Redis
-    if docker exec second-brain-cognee-redis redis-cli ping > /dev/null 2>&1; then
+    if docker exec btc-algo-cognee-redis redis-cli ping > /dev/null 2>&1; then
         echo -e "${GREEN}✓${NC} Redis: healthy"
     else
         echo -e "${RED}✗${NC} Redis: unhealthy"
     fi
-    
+
     # Check Neo4j
-    if curl -s http://localhost:7474 > /dev/null 2>&1; then
+    if curl -s http://localhost:7475 > /dev/null 2>&1; then
         echo -e "${GREEN}✓${NC} Neo4j: healthy"
     else
         echo -e "${RED}✗${NC} Neo4j: unhealthy"
@@ -138,35 +138,35 @@ cmd_health() {
 
 cmd_shell_db() {
     echo -e "${BLUE}🐘 Connecting to PostgreSQL...${NC}"
-    docker exec -it second-brain-cognee-db psql -U cognee -d cognee
+    docker exec -it btc-algo-cognee-db psql -U cognee -d cognee
 }
 
 cmd_shell_redis() {
     echo -e "${BLUE}📦 Connecting to Redis...${NC}"
-    docker exec -it second-brain-cognee-redis redis-cli
+    docker exec -it btc-algo-cognee-redis redis-cli
 }
 
 cmd_shell_neo4j() {
     echo -e "${BLUE}🔗 Connecting to Neo4j...${NC}"
     echo "Password: Check .env for COGNEE_NEO4J_PASSWORD"
-    docker exec -it second-brain-cognee-neo4j cypher-shell -u neo4j
+    docker exec -it btc-algo-cognee-neo4j cypher-shell -u neo4j
 }
 
 cmd_backup() {
     BACKUP_DIR="backups/cognee-$(date +%Y%m%d-%H%M%S)"
     mkdir -p "$BACKUP_DIR"
-    
+
     echo -e "${BLUE}💾 Backing up Cognee data...${NC}"
-    
+
     # Backup PostgreSQL
     echo "  Backing up PostgreSQL..."
-    docker exec second-brain-cognee-db pg_dump -U cognee cognee > "$BACKUP_DIR/postgres.sql"
-    
+    docker exec btc-algo-cognee-db pg_dump -U cognee cognee > "$BACKUP_DIR/postgres.sql"
+
     # Backup Neo4j (export as Cypher)
     echo "  Backing up Neo4j..."
-    docker exec second-brain-cognee-neo4j neo4j-admin dump --to=/tmp/neo4j-backup.dump
-    docker cp second-brain-cognee-neo4j:/tmp/neo4j-backup.dump "$BACKUP_DIR/neo4j.dump"
-    
+    docker exec btc-algo-cognee-neo4j neo4j-admin dump --to=/tmp/neo4j-backup.dump
+    docker cp btc-algo-cognee-neo4j:/tmp/neo4j-backup.dump "$BACKUP_DIR/neo4j.dump"
+
     echo -e "${GREEN}✓${NC} Backup complete: $BACKUP_DIR"
 }
 

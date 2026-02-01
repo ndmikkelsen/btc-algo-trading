@@ -152,13 +152,13 @@ Implementation Plan:
 - Add search UI to Obsidian
 EOF
 
-curl -X POST http://localhost:8000/api/v1/add \
+curl -X POST http://localhost:8001/api/v1/add \
   -F "data=@/tmp/cognee-search-issue.txt" \
-  -F "datasetName=second-brain-issues"
+  -F "datasetName=btc-issues"
 
-curl -X POST http://localhost:8000/api/v1/cognify \
+curl -X POST http://localhost:8001/api/v1/cognify \
   -H "Content-Type: application/json" \
-  -d '{"datasets": ["second-brain-issues"]}'
+  -d '{"datasets": ["btc-issues"]}'
 ```
 
 ## Common Patterns

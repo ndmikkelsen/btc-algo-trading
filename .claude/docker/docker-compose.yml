@@ -1,17 +1,24 @@
-# Cognee AI Memory Layer - Second-Brain Repository
+# Cognee AI Memory Layer - BTC Algo Trading Repository
 #
-# This Cognee stack is SPECIFIC to the second-brain repository.
+# This Cognee stack is SPECIFIC to the btc-algo-trading repository.
 # Each repository should have its own Cognee instance to prevent cross-contamination.
 #
 # Location: .claude/docker/docker-compose.yml
 #
 # Usage:
-#   cd /path/to/second-brain
+#   cd /path/to/btc-algo-trading
 #   .claude/scripts/cognee-local.sh up
 #   .claude/scripts/cognee-local.sh down
 #   .claude/scripts/cognee-local.sh logs
+#
+# Ports (different from second-brain to allow concurrent operation):
+#   PostgreSQL: 5434 (second-brain uses 5433)
+#   Redis: 6381 (second-brain uses 6380)
+#   Neo4j HTTP: 7475 (second-brain uses 7474)
+#   Neo4j Bolt: 7688 (second-brain uses 7687)
+#   Cognee API: 8001 (second-brain uses 8000)
 
-name: second-brain-cognee
+name: btc-algo-cognee
 
 services:
   # =============================================================================
@@ -20,7 +27,7 @@ services:
   # =============================================================================
   cognee-db:
     image: pgvector/pgvector:pg17
-    container_name: second-brain-cognee-db
+    container_name: btc-algo-cognee-db
     restart: unless-stopped
     environment:
       - POSTGRES_USER=cognee
@@ -29,7 +36,7 @@ services:
     volumes:
       - cognee-db-data:/var/lib/postgresql/data
     ports:
-      - "5433:5432"  # Expose on 5433 to avoid conflicts with local PostgreSQL
+      - "5434:5432"  # Expose on 5434 (second-brain uses 5433)
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U cognee"]
       interval: 10s
@@ -42,13 +49,13 @@ services:
   # =============================================================================
   cognee-redis:
     image: redis:7-alpine
-    container_name: second-brain-cognee-redis
+    container_name: btc-algo-cognee-redis
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - cognee-redis-data:/data
     ports:
-      - "6380:6379"  # Expose on 6380 to avoid conflicts with local Redis
+      - "6381:6379"  # Expose on 6381 (second-brain uses 6380)
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -61,7 +68,7 @@ services:
   # =============================================================================
   cognee-neo4j:
     image: neo4j:5
-    container_name: second-brain-cognee-neo4j
+    container_name: btc-algo-cognee-neo4j
     restart: unless-stopped
     environment:
       - NEO4J_AUTH=neo4j/${COGNEE_NEO4J_PASSWORD:-neo4j_password}
@@ -76,8 +83,8 @@ services:
       - cognee-neo4j-data:/data
       - cognee-neo4j-logs:/logs
     ports:
-      - "7474:7474"  # Web UI
-      - "7687:7687"  # Bolt protocol
+      - "7475:7474"  # Web UI (second-brain uses 7474)
+      - "7688:7687"  # Bolt protocol (second-brain uses 7687)
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:7474 | grep -qi neo4j || exit 1"]
       interval: 20s
@@ -90,7 +97,7 @@ services:
   # =============================================================================
   cognee:
     image: cognee/cognee:latest
-    container_name: second-brain-cognee
+    container_name: btc-algo-cognee
     restart: unless-stopped
     depends_on:
       cognee-db:
@@ -132,7 +139,7 @@ services:
       - REQUIRE_AUTHENTICATION=${COGNEE_REQUIRE_AUTH:-false}
       - ENABLE_BACKEND_ACCESS_CONTROL=${COGNEE_ACCESS_CONTROL:-false}
     ports:
-      - "8000:8000"
+      - "8001:8000"  # Expose on 8001 (second-brain uses 8000)
     healthcheck:
       test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:8000/health || exit 1"]
       interval: 15s
@@ -144,18 +151,18 @@ services:
 # =============================================================================
 volumes:
   cognee-db-data:
-    name: second-brain-cognee-db
+    name: btc-algo-cognee-db
   cognee-redis-data:
-    name: second-brain-cognee-redis
+    name: btc-algo-cognee-redis
   cognee-neo4j-data:
-    name: second-brain-cognee-neo4j
+    name: btc-algo-cognee-neo4j
   cognee-neo4j-logs:
-    name: second-brain-cognee-neo4j-logs
+    name: btc-algo-cognee-neo4j-logs
 
 # =============================================================================
 # NETWORKS - Repository-specific bridge network
 # =============================================================================
 networks:
   default:
-    name: second-brain-cognee
+    name: btc-algo-cognee
     driver: bridge
