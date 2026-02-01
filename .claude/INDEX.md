@@ -1,18 +1,21 @@
-# Second Brain - Knowledge System
+# BTC Algo Trading - Knowledge System
 
 > AI Development Guide and Knowledge Index
 
-**Last Updated**: 2026-01-25
+**Last Updated**: 2026-01-31
 
 ---
 
 ## Structure
 
 ```
-second-brain/
+btc-algo-trading/
 ├── .rules/              # Technical documentation (architecture, patterns)
 ├── .claude/             # AI workflow (commands, scripts)
 ├── .beads/              # Issue tracking (bd commands)
+├── strategies/          # Freqtrade strategy implementations
+├── backtests/           # Backtest results and analysis
+├── config/              # Freqtrade configuration
 └── Core docs            # AGENTS.md, CONSTITUTION.md, VISION.md, PLAN.md
 ```
 
@@ -112,9 +115,11 @@ Semantic search over knowledge garden and session history.
 
 | Dataset | Content |
 |---------|---------|
-| `knowledge-garden` | `.claude/` files |
-| `second-brain-patterns` | `.rules/` files |
-| `second-brain-sessions` | Session history from `/land` |
+| `btc-knowledge-garden` | `.claude/` files |
+| `btc-patterns` | `.rules/` files |
+| `btc-sessions` | Session history from `/land` |
+| `btc-strategies` | `strategies/` code and docs |
+| `btc-backtests` | `backtests/` results |
 
 See [.rules/architecture/cognee-integration.md](.rules/architecture/cognee-integration.md)
 

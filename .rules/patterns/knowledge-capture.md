@@ -1,7 +1,7 @@
 ---
-description: Knowledge capture and management philosophy for second-brain
-tags: [knowledge-management, philosophy, best-practices]
-last_updated: 2026-01-25
+description: Knowledge capture and management philosophy for BTC algo trading
+tags: [knowledge-management, philosophy, best-practices, trading]
+last_updated: 2026-01-31
 ---
 
 # Knowledge Capture & Management

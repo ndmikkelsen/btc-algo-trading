@@ -47,15 +47,15 @@ Read .rules/architecture/obsidian-integration.md
 These docs are indexed in Cognee datasets:
 
 - `second-brain-constitution` - CONSTITUTION.md, VISION.md, PLAN.md
-- `second-brain-patterns` - .rules/ pattern docs
+- `btc-patterns` - .rules/ pattern docs
 - `knowledge-garden` - .claude/ workflow docs
-- `second-brain-sessions` - Session history
+- `btc-sessions` - Session history
 
 Query Cognee for context:
 
 ```bash
 # Standard query
-curl -X POST http://localhost:8000/api/v1/search \
+curl -X POST http://localhost:8001/api/v1/search \
   -H "Content-Type: application/json" \
   -d '{"query": "How should I capture new patterns?"}'
 
