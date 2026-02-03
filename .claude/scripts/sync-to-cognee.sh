@@ -135,13 +135,30 @@ sync_constitution() {
 # Sync homelab documentation
 sync_homelab() {
     log_info "=== Syncing Homelab Documentation ==="
-    
+
     files=()
     while IFS= read -r -d '' file; do
         files+=("$file")
     done < <(find "$REPO_ROOT/personal/projects/home-lab" -name "*.md" -type f -print0 2>/dev/null)
-    
+
     upload_files "homelab-documentation" "${files[@]}"
+}
+
+# Sync backtest findings
+sync_backtests() {
+    log_info "=== Syncing Backtest Findings ==="
+
+    files=()
+    while IFS= read -r -d '' file; do
+        files+=("$file")
+    done < <(find "$REPO_ROOT/backtests/findings" -name "*.md" -type f -print0 2>/dev/null)
+
+    if [ ${#files[@]} -eq 0 ]; then
+        log_warn "No backtest findings found in backtests/findings/"
+        return 0
+    fi
+
+    upload_files "backtest-findings" "${files[@]}"
 }
 
 # Main execution
@@ -170,6 +187,7 @@ main() {
         sync_patterns
         sync_constitution
         sync_homelab
+        sync_backtests
         log_info "=== All datasets synced ==="
     else
         # Sync specific dataset
@@ -186,9 +204,12 @@ main() {
             homelab|home-lab)
                 sync_homelab
                 ;;
+            backtests|backtest|findings)
+                sync_backtests
+                ;;
             *)
                 log_error "Unknown dataset: $1"
-                log_info "Available datasets: knowledge-garden, patterns, constitution, homelab"
+                log_info "Available datasets: knowledge-garden, patterns, constitution, homelab, backtests"
                 exit 1
                 ;;
         esac
