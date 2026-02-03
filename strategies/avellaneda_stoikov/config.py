@@ -70,3 +70,27 @@ QUOTE_REFRESH_INTERVAL = 1.0
 
 # Cancel orders if price moves more than this (as decimal)
 PRICE_TOLERANCE = 0.002
+
+# =============================================================================
+# Fee Parameters (Bybit Spot)
+# =============================================================================
+
+# Maker fee (limit orders that add liquidity)
+MAKER_FEE = 0.001  # 0.1%
+
+# Taker fee (market orders that remove liquidity)
+TAKER_FEE = 0.001  # 0.1%
+
+# =============================================================================
+# Regime Detection Parameters
+# =============================================================================
+
+# ADX threshold for trending market
+# Above this = trending, below = ranging
+ADX_TREND_THRESHOLD = 25
+
+# ADX calculation period
+ADX_PERIOD = 14
+
+# Reduce position size in trending markets by this factor
+TREND_POSITION_SCALE = 0.5
