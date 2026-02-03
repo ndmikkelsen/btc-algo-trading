@@ -172,6 +172,23 @@ sync_backtests() {
     upload_files "btc-backtests" "${files[@]}"
 }
 
+# Sync backtest findings
+sync_backtests() {
+    log_info "=== Syncing Backtest Findings ==="
+
+    files=()
+    while IFS= read -r -d '' file; do
+        files+=("$file")
+    done < <(find "$REPO_ROOT/backtests/findings" -name "*.md" -type f -print0 2>/dev/null)
+
+    if [ ${#files[@]} -eq 0 ]; then
+        log_warn "No backtest findings found in backtests/findings/"
+        return 0
+    fi
+
+    upload_files "backtest-findings" "${files[@]}"
+}
+
 # Main execution
 main() {
     cd "$REPO_ROOT"
@@ -216,6 +233,9 @@ main() {
                 sync_strategies
                 ;;
             backtests)
+                sync_backtests
+                ;;
+            backtests|backtest|findings)
                 sync_backtests
                 ;;
             *)

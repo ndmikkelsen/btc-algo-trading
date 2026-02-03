@@ -1,55 +1,119 @@
 # Skills
 
-Skills are reusable workflows for common knowledge management tasks. They provide structured approaches to formatting, organizing, and maintaining the knowledge system.
+Skills are reusable workflows for common tasks. They provide structured approaches to development, formatting, and maintaining the knowledge system.
 
 ## Available Skills
 
-### 1. formatting-notes
+### Development Workflow
+
+These skills form a complete TDD development cycle:
+
+```
+beads epic → planning-from-tasks → .plan.md → creating-tasks-from-plans → beads tasks → implementing-with-tdd
+```
+
+#### 1. planning-from-tasks
+
+**Purpose**: Create detailed implementation plans from beads epics
+
+**When to use**:
+
+- Starting work on a new feature or epic
+- Need to break down a large task into phases
+- Want to document design decisions before coding
+
+**Input**: Beads epic ID
+**Output**: `{feature}.plan.md` file
+
+**Triggers**: "plan this epic", "create implementation plan", "how should we implement"
+
+#### 2. creating-tasks-from-plans
+
+**Purpose**: Generate beads tasks from `.plan.md` files
+
+**When to use**:
+
+- A `.plan.md` exists and is approved
+- Need trackable tasks with dependencies
+- Ready to start implementation
+
+**Input**: `.plan.md` file
+**Output**: Beads tasks with dependencies
+
+**Triggers**: "create tasks from plan", "break down the plan", "generate beads issues"
+
+#### 3. implementing-with-tdd
+
+**Purpose**: Implement tasks using strict TDD red-green-refactor
+
+**When to use**:
+
+- Working on any implementation task
+- Adding new features or fixing bugs
+- Want test-first discipline
+
+**Input**: Beads task ID
+**Output**: Tested, working code
+
+**Triggers**: "implement this task", "TDD this feature", "write the code for"
+
+---
+
+### Knowledge Management
+
+#### 4. formatting-notes
 
 **Purpose**: Format markdown notes with consistent structure, fix links, and validate URLs
 
 **When to use**:
+
 - Cleaning up documentation
 - Validating links in knowledge garden
 - Before committing markdown changes
-- After creating or updating multiple notes
 
-**Input**: Files or directories to format  
+**Input**: Files or directories to format
 **Output**: Formatted markdown with validated links
 
-**Triggers**: "format notes", "fix markdown", "validate links", "clean up documentation"
+**Triggers**: "format notes", "fix markdown", "validate links"
 
 ---
 
-## Workflow Example
+## Workflow Examples
+
+### Complete Feature Development
 
 ```bash
-# 1. Create or update notes
-# ... work on documentation ...
+# 1. Create epic in beads
+bd create --title="New Strategy Feature" --type=feature --priority=1
 
-# 2. Format and validate
-# Use: formatting-notes skill
-python3 .claude/scripts/format_markdown.py --dry-run .rules/
+# 2. Plan the feature (planning-from-tasks skill)
+bd show <epic-id>
+# Creates: docs/plans/new-strategy.plan.md
 
-# 3. Review changes, apply if approved
-python3 .claude/scripts/format_markdown.py .rules/
+# 3. Create tasks from plan (creating-tasks-from-plans skill)
+# Creates beads tasks with dependencies
 
-# 4. Commit formatted notes
-git add .rules/
-git commit -m "docs(rules): format and validate links"
+# 4. Implement with TDD (implementing-with-tdd skill)
+bd ready                           # Find available work
+bd update <task-id> --status in_progress
+pytest                             # RED: write failing test
+# ... write code ...
+pytest                             # GREEN: test passes
+bd close <task-id>                 # Complete task
 ```
 
-## Integration with Knowledge System
-
-### Before Syncing to Cognee
-
-Formatting happens automatically via `/land`:
+### Quick Bug Fix
 
 ```bash
-# /land automatically:
-# 1. Formats all changed markdown files (Step 4)
-# 2. Commits changes
-# 3. Syncs to Cognee if .claude/ or .rules/ changed (Step 8)
+# 1. Create task
+bd create --title="Fix RSI calculation" --type=bug --priority=1
+
+# 2. Implement with TDD
+bd update <task-id> --status in_progress
+pytest tests/test_indicators.py   # RED
+# ... fix bug ...
+pytest tests/test_indicators.py   # GREEN
+bd close <task-id>
 ```
 
 ### Manual Formatting (if needed)
@@ -74,8 +138,6 @@ Different repositories have different skills based on their primary use case.
 
 ## Related Documentation
 
-- [Knowledge Capture](.rules/patterns/knowledge-capture.md)
-- [Git Workflow](.rules/patterns/git-workflow.md)
-- [/land Command](.claude/commands/land.md)
-- [CONSTITUTION.md](../../CONSTITUTION.md)
-- [VISION.md](../../VISION.md)
+- [AGENTS.md](../../AGENTS.md) - Complete AI development guide
+- [CONSTITUTION.md](../../CONSTITUTION.md) - Core values
+- [/land Command](.claude/commands/land.md) - Session completion
