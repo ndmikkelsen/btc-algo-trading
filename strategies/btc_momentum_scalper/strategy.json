@@ -1,0 +1,34 @@
+{
+  "strategy_name": "BTCMomentumScalper",
+  "params": {
+    "max_open_trades": {
+      "max_open_trades": 3
+    },
+    "sell": {
+      "sell_rsi_max": 80
+    },
+    "buy": {
+      "buy_ema_long": 20,
+      "buy_ema_short": 6,
+      "buy_rsi_max": 74,
+      "buy_volume_factor": 0.6
+    },
+    "roi": {
+      "0": 0.212,
+      "15": 0.052,
+      "31": 0.023,
+      "80": 0
+    },
+    "stoploss": {
+      "stoploss": -0.261
+    },
+    "trailing": {
+      "trailing_stop": true,
+      "trailing_stop_positive": 0.084,
+      "trailing_stop_positive_offset": 0.092,
+      "trailing_only_offset_is_reached": true
+    }
+  },
+  "ft_stratparam_v": 1,
+  "export_time": "2026-02-03 01:58:42.036749+00:00"
+}

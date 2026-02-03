@@ -1,0 +1,50 @@
+[
+  {
+    "timerange": "20250202-20260203",
+    "market_change": "-22.14%",
+    "trades": "44",
+    "avg_profit_pct": "-0.10",
+    "total_profit_usdt": "-146.442",
+    "total_profit_pct": "-1.46",
+    "avg_duration": "4:20:00",
+    "win_draw_loss": "14    26     4  31.8",
+    "drawdown": "223.995 USDT  2.23%",
+    "name": "all_data_1yr"
+  },
+  {
+    "timerange": "20251106-20260203",
+    "market_change": "-24.21%",
+    "trades": "9",
+    "avg_profit_pct": "-0.12",
+    "total_profit_usdt": "-35.644",
+    "total_profit_pct": "-0.36",
+    "avg_duration": "1:35:00",
+    "win_draw_loss": "3     5     1  33.3",
+    "drawdown": "72.564 USDT  0.73%",
+    "name": "last_90d"
+  },
+  {
+    "timerange": "20251205-20260203",
+    "market_change": "-14.84%",
+    "trades": "7",
+    "avg_profit_pct": "-0.16",
+    "total_profit_usdt": "-36.590",
+    "total_profit_pct": "-0.37",
+    "avg_duration": "1:45:00",
+    "win_draw_loss": "2     4     1  28.6",
+    "drawdown": "72.557 USDT  0.73%",
+    "name": "last_60d"
+  },
+  {
+    "timerange": "20260104-20260203",
+    "market_change": "-13.64%",
+    "trades": "6",
+    "avg_profit_pct": "-0.20",
+    "total_profit_usdt": "-39.773",
+    "total_profit_pct": "-0.4",
+    "avg_duration": "1:52:00",
+    "win_draw_loss": "1     4     1  16.7",
+    "drawdown": "72.533 USDT  0.73%",
+    "name": "last_30d"
+  }
+]
