@@ -1,5 +1,5 @@
 """
-Shared pytest fixtures for BTCMomentumScalper tests.
+Shared pytest fixtures for strategy tests.
 """
 
 import numpy as np
@@ -9,10 +9,10 @@ import pytest
 
 @pytest.fixture
 def sample_ohlcv():
-    """Generate 30 candles of sample OHLCV data."""
+    """Generate 100 candles of sample OHLCV data (enough for MACD calculations)."""
     np.random.seed(42)
-    n = 30
-    dates = pd.date_range(start="2025-01-01", periods=n, freq="5min")
+    n = 100
+    dates = pd.date_range(start="2025-01-01", periods=n, freq="4h")
 
     # Generate realistic BTC price data around $100,000
     base_price = 100000
@@ -41,14 +41,14 @@ def sample_ohlcv():
 
 @pytest.fixture
 def uptrend_ohlcv():
-    """Generate 50 candles with clear uptrend."""
+    """Generate 100 candles with clear uptrend."""
     np.random.seed(123)
-    n = 50
-    dates = pd.date_range(start="2025-01-01", periods=n, freq="5min")
+    n = 100
+    dates = pd.date_range(start="2025-01-01", periods=n, freq="4h")
 
     # Generate uptrending prices
     base_price = 100000
-    trend = np.linspace(0, 2000, n)  # Upward trend component
+    trend = np.linspace(0, 4000, n)  # Upward trend component
     noise = np.random.randn(n) * 50
     close = base_price + trend + noise
 
@@ -73,14 +73,14 @@ def uptrend_ohlcv():
 
 @pytest.fixture
 def downtrend_ohlcv():
-    """Generate 50 candles with clear downtrend."""
+    """Generate 100 candles with clear downtrend."""
     np.random.seed(456)
-    n = 50
-    dates = pd.date_range(start="2025-01-01", periods=n, freq="5min")
+    n = 100
+    dates = pd.date_range(start="2025-01-01", periods=n, freq="4h")
 
     # Generate downtrending prices
     base_price = 100000
-    trend = np.linspace(0, -2000, n)  # Downward trend component
+    trend = np.linspace(0, -4000, n)  # Downward trend component
     noise = np.random.randn(n) * 50
     close = base_price + trend + noise
 
@@ -101,10 +101,3 @@ def downtrend_ohlcv():
         "close": close,
         "volume": volume,
     })
-
-
-@pytest.fixture
-def strategy():
-    """Create a configured strategy instance."""
-    from strategies.btc_momentum_scalper.strategy import BTCMomentumScalper
-    return BTCMomentumScalper({})

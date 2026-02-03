@@ -1,1 +1,0 @@
-"""Freqtrade strategies package."""
