@@ -1,64 +1,89 @@
-# PLAN.md - BTC Algo Trading
+# PLAN.md - Avellaneda-Stoikov Market Making
 
-> Working memory for the algorithmic trading project.
+> Working memory for implementing the Avellaneda-Stoikov market making model.
 
 ## Current Focus
 
-**Phase 1: Environment & Data Acquisition**
+**Implementing Avellaneda-Stoikov Market Making Strategy**
+
+## Overview
+
+The Avellaneda-Stoikov (2008) model is a mathematical framework for optimal market making that:
+- Places both bid and ask orders simultaneously
+- Dynamically adjusts spreads based on inventory risk
+- Uses a reservation price that accounts for position exposure
+- Optimizes for profit while managing inventory risk
+
+## Key Formulas
+
+### Reservation Price
+```
+r = S - q × γ × σ² × (T - t)
+```
+Where:
+- S = Mid price
+- q = Current inventory (positive = long, negative = short)
+- γ = Risk aversion parameter
+- σ² = Price volatility
+- (T - t) = Time remaining in trading session
+
+### Optimal Spread
+```
+δ = γ × σ² × (T - t) + (2/γ) × ln(1 + γ/κ)
+```
+Where:
+- κ = Order book liquidity parameter
+
+### Optimal Quotes
+```
+bid = r - δ/2
+ask = r + δ/2
+```
 
 ## Milestones
 
-### M1: Development Environment (Not Started)
-- [ ] Install Freqtrade
-- [ ] Configure exchange API (Binance paper trading)
-- [ ] Set up project structure
-- [ ] Verify backtesting works with sample data
+### M1: Core Model Implementation
+- [ ] Implement volatility estimation (rolling window)
+- [ ] Implement reservation price calculation
+- [ ] Implement optimal spread calculation
+- [ ] Unit tests for all calculations
 
-### M2: Historical Data (Not Started)
-- [ ] Download Binance BTC/USDT (2017-present)
-- [ ] Download Bitstamp data (2012-2017) for extended history
-- [ ] Validate data quality (no gaps, OHLC integrity)
-- [ ] Merge datasets into unified format
+### M2: Order Management
+- [ ] Implement quote generation (bid/ask prices)
+- [ ] Implement inventory tracking
+- [ ] Implement position limits
+- [ ] Implement order placement logic
 
-### M3: Strategy Implementation (Not Started)
-- [ ] Implement simple momentum strategy (25-day lookback)
-- [ ] Implement mean reversion strategy (Bollinger Bands)
-- [ ] Implement hybrid 50/50 portfolio
-- [ ] Unit tests for each strategy
+### M3: Backtesting Framework
+- [ ] Build market making backtester (different from directional)
+- [ ] Simulate order fills based on price movement
+- [ ] Track P&L including spread capture
+- [ ] Generate performance metrics
 
-### M4: Backtesting & Analysis (Not Started)
-- [ ] Backtest all strategies against full history (2012-present)
-- [ ] Analyze performance by market regime
-- [ ] Compare: Sharpe ratio, max drawdown, win rate
-- [ ] Document findings
+### M4: Parameter Optimization
+- [ ] Tune risk aversion (γ)
+- [ ] Tune volatility window
+- [ ] Tune order book liquidity (κ)
+- [ ] Optimize for Sharpe ratio
 
-### M5: Paper Trading (Not Started)
-- [ ] Deploy best strategy to paper trading
-- [ ] Run for 1-3 months
-- [ ] Compare live results to backtest expectations
-- [ ] Refine if needed
+## Parameters
 
-### M6: Live Trading (Not Started)
-- [ ] Start with minimal position sizing
-- [ ] Gradual scale-up based on performance
-- [ ] Monitoring and alerting
+| Parameter | Symbol | Description | Typical Range |
+|-----------|--------|-------------|---------------|
+| Risk Aversion | γ | How much to penalize inventory | 0.01 - 1.0 |
+| Volatility Window | w | Candles for σ calculation | 20 - 100 |
+| Time Horizon | T | Trading session length | 1 day |
+| Liquidity | κ | Order book density | 1.0 - 10.0 |
 
-## Decisions Log
+## Notes
 
-| Date | Decision | Rationale |
-|------|----------|-----------|
-| 2026-01-30 | Start with Freqtrade | Best Python framework, ML support, active community |
-| 2026-01-30 | Target 2012+ data | Covers all major market regimes |
-| 2026-01-30 | Test momentum + mean reversion + hybrid | Research shows hybrid outperforms single strategies |
-
-## Open Questions
-
-- Which exchange for live trading? (Binance, Kraken, Coinbase)
-- Position sizing strategy?
-- Risk management rules (max drawdown, stop-loss)?
+- This is market making, NOT directional trading
+- Requires placing orders on both sides of the book
+- Profit comes from spread capture, not price prediction
+- Risk comes from adverse selection and inventory accumulation
 
 ## Resources
 
-- [Algorithmic Trading Strategies Research](../second-brain/personal/trading/crypto/algorithmic-trading-strategies.md)
-- [Freqtrade Documentation](https://www.freqtrade.io/en/stable/)
-- [CCXT Library](https://github.com/ccxt/ccxt)
+- [Original Paper](https://www.math.nyu.edu/~avellane/HighFrequencyTrading.pdf)
+- [Hummingbot A-S Guide](https://hummingbot.org/blog/guide-to-the-avellaneda--stoikov-strategy/)
+- [GitHub Implementation](https://github.com/fedecaccia/avellaneda-stoikov)
