@@ -70,7 +70,7 @@ Cognee must be running:
 
 ```bash
 # Check if Cognee is running
-curl http://localhost:8000/health
+curl http://localhost:8001/health
 
 # If not running, start it
 .claude/scripts/cognee-local.sh up
@@ -84,14 +84,14 @@ When user invokes `/query <question>`:
 
 1. **Check Cognee availability**:
    ```bash
-   curl -s http://localhost:8000/health
+   curl -s http://localhost:8001/health
    ```
 
    If not available, tell user to start Cognee.
 
 2. **Submit search query**:
    ```bash
-   curl -X POST http://localhost:8000/api/v1/search \
+   curl -X POST http://localhost:8001/api/v1/search \
      -H "Content-Type: application/json" \
      -d "{\"query\": \"<question>\"}"
    ```
@@ -111,14 +111,14 @@ When user invokes `/query <question>`:
 By default, searches across all datasets:
 
 - `knowledge-garden` - .claude/ files (commands, patterns, templates)
-- `second-brain-patterns` - .rules/ files (architecture, technical patterns)
-- `second-brain-sessions` - Session history from `/land`
-- `second-brain-constitution` - CONSTITUTION.md, VISION.md, PLAN.md (used with `--with-values`)
+- `btc-patterns` - .rules/ files (architecture, technical patterns)
+- `btc-sessions` - Session history from `/land`
+- `btc-constitution` - CONSTITUTION.md, VISION.md, PLAN.md (used with `--with-values`)
 
 To search specific dataset:
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/search \
+curl -X POST http://localhost:8001/api/v1/search \
   -H "Content-Type: application/json" \
   -d '{
     "query": "your question",

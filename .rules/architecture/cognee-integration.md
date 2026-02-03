@@ -1,12 +1,12 @@
 ---
-description: Cognee AI memory layer integration for second-brain knowledge system
-tags: [cognee, architecture, knowledge-graph, semantic-search]
-last_updated: 2026-01-25
+description: Cognee AI memory layer integration for BTC algo trading knowledge system
+tags: [cognee, architecture, knowledge-graph, semantic-search, trading]
+last_updated: 2026-01-31
 ---
 
 # Cognee Integration Architecture
 
-Cognee provides semantic search, knowledge graphs, and AI-powered insights over the second-brain knowledge system.
+Cognee provides semantic search, knowledge graphs, and AI-powered insights over the BTC algo trading knowledge system.
 
 ## Overview
 
@@ -98,7 +98,7 @@ Cognee provides semantic search, knowledge graphs, and AI-powered insights over 
    │
 3. For each file:
    │  ├─ Upload to Cognee API (POST /api/v1/add)
-   │  ├─ Assign to dataset (knowledge-garden or second-brain-patterns)
+   │  ├─ Assign to dataset (knowledge-garden or btc-patterns)
    │  └─ Store metadata (file path, last modified, etc.)
    │
 4. Cognee processes files:
@@ -147,7 +147,7 @@ Cognee provides semantic search, knowledge graphs, and AI-powered insights over 
    │
 3. Upload to Cognee:
    │  ├─ POST /api/v1/add
-   │  ├─ Dataset: second-brain-sessions
+   │  ├─ Dataset: btc-sessions
    │  └─ Cognify to update graph
    │
 4. Session indexed and searchable:
@@ -160,22 +160,24 @@ Cognee provides semantic search, knowledge graphs, and AI-powered insights over 
 
 | Dataset | Source | Purpose |
 |---------|--------|---------|
-| `knowledge-garden` | `.claude/` files | Commands, patterns, quick references |
-| `second-brain-patterns` | `.rules/` files | Architecture, technical patterns |
-| `second-brain-sessions` | Session summaries | Work history, decisions, solutions |
+| `btc-knowledge-garden` | `.claude/` files | Commands, patterns, quick references |
+| `btc-patterns` | `.rules/` files | Architecture, technical patterns |
+| `btc-constitution` | CONSTITUTION.md, VISION.md, PLAN.md, AGENTS.md | Core values and guidance |
+| `btc-strategies` | `strategies/` | Trading strategy code and docs |
+| `btc-backtests` | `backtests/` | Backtest results and analysis |
 
 ## API Endpoints
 
 ### Health Check
 
 ```bash
-GET http://localhost:8000/health
+GET http://localhost:8001/health
 ```
 
 ### Add Document
 
 ```bash
-POST http://localhost:8000/api/v1/add
+POST http://localhost:8001/api/v1/add
 Content-Type: multipart/form-data
 
 data: @file.md
@@ -185,18 +187,18 @@ datasetName: knowledge-garden
 ### Cognify (Build Knowledge Graph)
 
 ```bash
-POST http://localhost:8000/api/v1/cognify
+POST http://localhost:8001/api/v1/cognify
 Content-Type: application/json
 
 {
-  "datasets": ["knowledge-garden", "second-brain-patterns"]
+  "datasets": ["knowledge-garden", "btc-patterns"]
 }
 ```
 
 ### Search
 
 ```bash
-POST http://localhost:8000/api/v1/search
+POST http://localhost:8001/api/v1/search
 Content-Type: application/json
 
 {
@@ -229,11 +231,13 @@ COGNEE_REQUIRE_AUTH=false
 
 | Service | Container | Host | Purpose |
 |---------|-----------|------|---------|
-| PostgreSQL | 5432 | 5433 | Vector DB |
-| Redis | 6379 | 6380 | Cache |
-| Neo4j HTTP | 7474 | 7474 | Browser UI |
-| Neo4j Bolt | 7687 | 7687 | Protocol |
-| Cognee API | 8000 | 8000 | REST API |
+| PostgreSQL | 5432 | 5434 | Vector DB |
+| Redis | 6379 | 6381 | Cache |
+| Neo4j HTTP | 7474 | 7475 | Browser UI |
+| Neo4j Bolt | 7687 | 7688 | Protocol |
+| Cognee API | 8000 | 8001 | REST API |
+
+> Note: Ports differ from second-brain (5433, 6380, 7474, 7687, 8000) to allow concurrent operation.
 
 ## Workflows
 

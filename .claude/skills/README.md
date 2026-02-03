@@ -116,6 +116,26 @@ pytest tests/test_indicators.py   # GREEN
 bd close <task-id>
 ```
 
+### Manual Formatting (if needed)
+
+```bash
+# Format specific files
+python3 .claude/scripts/format_markdown.py --yes file.md
+
+# Preview changes
+python3 .claude/scripts/format_markdown.py --dry-run .rules/
+git commit -m "docs: format markdown files"
+```
+
+## Skill Development
+
+Skills are tailored for btc-algo-trading's development focus:
+
+- **btc-algo-trading**: Trading strategy documentation, backtest analysis, Freqtrade workflows
+- **knowledge-garden**: Markdown formatting, link validation, pattern documentation
+
+Different repositories have different skills based on their primary use case.
+
 ## Related Documentation
 
 - [AGENTS.md](../../AGENTS.md) - Complete AI development guide

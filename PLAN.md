@@ -77,10 +77,28 @@ ask = r + δ/2
 
 ## Notes
 
-- This is market making, NOT directional trading
-- Requires placing orders on both sides of the book
-- Profit comes from spread capture, not price prediction
-- Risk comes from adverse selection and inventory accumulation
+| Date | Decision | Rationale |
+|------|----------|-----------|
+| 2026-01-30 | Start with Freqtrade | Best Python framework, ML support, active community |
+| 2026-01-30 | Target 2012+ data | Covers all major market regimes |
+| 2026-01-30 | Test momentum + mean reversion + hybrid | Research shows hybrid outperforms single strategies |
+| 2026-02-01 | Implement Cognee knowledge base | AI memory layer for semantic search over strategies, backtests, and session history |
+
+## Recent Milestones
+
+### Cognee Integration (2026-02-01) ✅
+
+Implemented isolated Cognee stack for btc-algo-trading knowledge base:
+- Unique ports (8001, 5434, 6381, 7475, 7688) - runs alongside second-brain
+- Datasets: btc-knowledge-garden, btc-patterns, btc-constitution, btc-strategies, btc-backtests
+- Semantic search over trading strategies and documentation
+- Session capture for queryable history
+
+## Open Questions
+
+- Which exchange for live trading? (Binance, Kraken, Coinbase)
+- Position sizing strategy?
+- Risk management rules (max drawdown, stop-loss)?
 
 ## Resources
 

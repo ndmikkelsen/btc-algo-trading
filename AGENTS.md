@@ -182,16 +182,16 @@ Semantic search over knowledge garden (`.rules/`, `.claude/`) and session histor
 | Dataset | Content |
 |---------|---------|
 | `knowledge-garden` | `.claude/` files |
-| `second-brain-patterns` | `.rules/` files (architecture, patterns) |
-| `second-brain-sessions` | Session history from `/land` |
-| `second-brain-constitution` | CONSTITUTION.md, VISION.md, PLAN.md |
-| `homelab-documentation` | Homelab builds (NAS, AI server, network, hardware) |
+| `btc-patterns` | `.rules/` files (architecture, patterns) |
+| `btc-sessions` | Session history from `/land` |
+| `btc-constitution` | CONSTITUTION.md, VISION.md, PLAN.md |
+| `btc-strategies` | Homelab builds (NAS, AI server, network, hardware) |
 
 ### Search Knowledge
 
 ```bash
 # Standard search
-curl -X POST http://localhost:8000/api/v1/search \
+curl -X POST http://localhost:8001/api/v1/search \
   -H "Content-Type: application/json" \
   -d '{"query": "How does beads integration work?"}'
 
@@ -230,9 +230,9 @@ curl -X POST http://localhost:8000/api/v1/search \
 **Auto-Sync (Planned):**
 Future integration with `/land` command to automatically detect and sync changes to:
 - `.claude/` → `knowledge-garden` dataset
-- `.rules/` → `second-brain-patterns` dataset
-- `CONSTITUTION.md`, `VISION.md`, `PLAN.md` → `second-brain-constitution` dataset
-- Session history → `second-brain-sessions` dataset
+- `.rules/` → `btc-patterns` dataset
+- `CONSTITUTION.md`, `VISION.md`, `PLAN.md` → `btc-constitution` dataset
+- Session history → `btc-sessions` dataset
 
 ## Conventions
 
@@ -349,7 +349,7 @@ Requires Docker and OpenAI API key:
 open http://localhost:7474
 
 # API docs
-open http://localhost:8000/docs
+open http://localhost:8001/docs
 ```
 
 See [.rules/architecture/cognee-integration.md](.rules/architecture/cognee-integration.md) for complete architecture.
