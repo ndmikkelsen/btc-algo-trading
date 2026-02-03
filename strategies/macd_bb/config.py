@@ -9,6 +9,11 @@ MACD_SIGNAL = 9
 BB_PERIOD = 20
 BB_STD = 2.0
 
+# Signal Generation
+BB_NEAR_THRESHOLD = 0.02  # 2% threshold for "near" band detection
+BB_LOOKBACK = 5  # Candles to look back for recent BB touch
+EXIT_ON_UPPER_BB = False  # Exit when price reaches upper BB (disabled - use trailing stop)
+
 # Risk Management
 STOPLOSS = -0.03  # 3% stop loss
 TAKE_PROFIT = 0.02  # 2% take profit

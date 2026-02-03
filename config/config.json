@@ -80,7 +80,7 @@
     "internals": {
         "process_throttle_secs": 5
     },
-    "use_exit_signal": true,
+    "use_exit_signal": false,
     "strategy": "MACDBB",
     "strategy_path": "strategies/macd_bb/",
     "timeframe": "4h"

@@ -16,6 +16,9 @@ from strategies.macd_bb.config import (
     TRAILING_STOP,
     TRAILING_STOP_POSITIVE,
     TRAILING_STOP_POSITIVE_OFFSET,
+    BB_NEAR_THRESHOLD,
+    BB_LOOKBACK,
+    EXIT_ON_UPPER_BB,
 )
 from strategies.macd_bb.indicators import add_all_indicators
 from strategies.macd_bb.signals import (
@@ -77,7 +80,11 @@ class MACDBB(IStrategy):
         """
         dataframe = add_all_indicators(dataframe)
         dataframe = detect_macd_crossover(dataframe)
-        dataframe = detect_bb_position(dataframe)
+        dataframe = detect_bb_position(
+            dataframe,
+            near_threshold=BB_NEAR_THRESHOLD,
+            lookback=BB_LOOKBACK,
+        )
         return dataframe
 
     def populate_entry_trend(
@@ -106,9 +113,11 @@ class MACDBB(IStrategy):
         """
         Generate exit signals.
 
-        Exit conditions (either):
+        Exit conditions:
         1. MACD line crosses BELOW signal line (momentum reversal)
-        2. Price touches upper Bollinger Band (profit zone)
+        2. Price touches upper Bollinger Band (if EXIT_ON_UPPER_BB is True)
+
+        Note: Trailing stop handles most profit-taking when EXIT_ON_UPPER_BB is False.
 
         Args:
             dataframe: DataFrame with indicators
@@ -117,5 +126,5 @@ class MACDBB(IStrategy):
         Returns:
             DataFrame with exit_long column
         """
-        dataframe = generate_exit_signal(dataframe)
+        dataframe = generate_exit_signal(dataframe, exit_on_upper_bb=EXIT_ON_UPPER_BB)
         return dataframe
