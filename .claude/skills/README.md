@@ -65,10 +65,10 @@ git commit -m "docs: format markdown files"
 
 ## Skill Development
 
-Skills are tailored for second-brain's knowledge management focus:
+Skills are tailored for btc-algo-trading's development focus:
 
-- **second-brain**: Markdown formatting, link validation, Obsidian compatibility
-- **media-stack**: Infrastructure planning, task breakdown, test-first development
+- **btc-algo-trading**: Trading strategy documentation, backtest analysis, Freqtrade workflows
+- **knowledge-garden**: Markdown formatting, link validation, pattern documentation
 
 Different repositories have different skills based on their primary use case.
 

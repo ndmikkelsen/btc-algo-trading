@@ -45,7 +45,7 @@ Cognee indexes the knowledge layer (`.rules/`, `.claude/`) while respecting the 
 
 ### 1. Constitution Dataset in Cognee
 
-**Dataset**: `second-brain-constitution`
+**Dataset**: `btc-constitution`
 
 Contains:
 - `CONSTITUTION.md` - Core values and principles
@@ -77,17 +77,17 @@ Add constitution files to `/land` Step 8b sync logic:
 CONSTITUTION_CHANGED=$(git diff --name-only main...HEAD | grep '^\(CONSTITUTION\|VISION\|PLAN\)\.md$' || echo "")
 
 if [ -n "$CONSTITUTION_CHANGED" ]; then
-  # Upload to second-brain-constitution dataset
+  # Upload to btc-constitution dataset
   for file in CONSTITUTION.md VISION.md PLAN.md; do
-    curl -X POST http://localhost:8000/api/v1/add \
+    curl -X POST http://localhost:8001/api/v1/add \
       -F "data=@${file}" \
-      -F "datasetName=second-brain-constitution"
+      -F "datasetName=btc-constitution"
   done
   
   # Cognify
-  curl -X POST http://localhost:8000/api/v1/cognify \
+  curl -X POST http://localhost:8001/api/v1/cognify \
     -H "Content-Type: application/json" \
-    -d '{"datasets": ["second-brain-constitution"]}'
+    -d '{"datasets": ["btc-constitution"]}'
 fi
 ```
 
@@ -95,10 +95,10 @@ fi
 
 | Dataset | Content | Purpose |
 |---------|---------|---------|
-| `second-brain-constitution` | CONSTITUTION.md, VISION.md, PLAN.md | Core principles, vision, working memory |
+| `btc-constitution` | CONSTITUTION.md, VISION.md, PLAN.md | Core principles, vision, working memory |
 | `knowledge-garden` | `.claude/` files | Commands, patterns, quick references |
-| `second-brain-patterns` | `.rules/` files | Architecture, technical patterns |
-| `second-brain-sessions` | Session summaries | Work history, decisions, solutions |
+| `btc-patterns` | `.rules/` files | Architecture, technical patterns |
+| `btc-sessions` | Session summaries | Work history, decisions, solutions |
 
 ## Query Flow
 
@@ -107,7 +107,7 @@ fi
 ```
 /query How do I capture patterns?
   ↓
-Search datasets: [knowledge-garden, second-brain-patterns, second-brain-sessions]
+Search datasets: [knowledge-garden, btc-patterns, btc-sessions]
   ↓
 Return: Direct answer from .claude/commands/remember.md
 ```
@@ -117,7 +117,7 @@ Return: Direct answer from .claude/commands/remember.md
 ```
 /query --with-values How should I organize notes?
   ↓
-1. Retrieve constitutional values from second-brain-constitution
+1. Retrieve constitutional values from btc-constitution
 2. Enhance query with relevant values
 3. Search all datasets
 4. Filter/prioritize results aligned with values
@@ -128,7 +128,7 @@ Return: Answer contextualized by "Clarity over complexity, Connection over isola
 ## Implementation Strategy
 
 ### Phase 1: Constitution Dataset (Completed)
-- [x] Create `second-brain-constitution` dataset
+- [x] Create `btc-constitution` dataset
 - [x] Add CONSTITUTION.md, VISION.md, PLAN.md to dataset
 - [x] Update `/land` Step 8b to auto-sync constitution files
 
@@ -239,7 +239,7 @@ Constitution files sync automatically via `/land`:
 
 ```bash
 # Check if constitution dataset exists
-curl -X GET http://localhost:8000/api/v1/datasets | grep constitution
+curl -X GET http://localhost:8001/api/v1/datasets | grep constitution
 
 # Query constitution directly
 /query --with-values What are our core values?
@@ -248,7 +248,7 @@ curl -X GET http://localhost:8000/api/v1/datasets | grep constitution
 ## Troubleshooting
 
 **Constitution not in search results:**
-- Verify dataset exists: `curl http://localhost:8000/api/v1/datasets`
+- Verify dataset exists: `curl http://localhost:8001/api/v1/datasets`
 - Ensure `/land` was run after constitution changes
 - Check Cognee logs: `docker logs cognee | tail -50`
 

@@ -260,14 +260,14 @@ Related Documentation:
 EOF
 
 # Upload to Cognee (skip if Cognee not running)
-if curl -s http://localhost:8000/health > /dev/null 2>&1; then
-  curl -X POST http://localhost:8000/api/v1/add \
+if curl -s http://localhost:8001/health > /dev/null 2>&1; then
+  curl -X POST http://localhost:8001/api/v1/add \
     -F "data=@$SESSION_FILE" \
-    -F "datasetName=second-brain-sessions"
+    -F "datasetName=btc-sessions"
 
-  curl -X POST http://localhost:8000/api/v1/cognify \
+  curl -X POST http://localhost:8001/api/v1/cognify \
     -H "Content-Type: application/json" \
-    -d '{"datasets": ["second-brain-sessions"]}'
+    -d '{"datasets": ["btc-sessions"]}'
 
   echo "✓ Session captured to Cognee"
   COGNEE_RUNNING=true
@@ -291,24 +291,24 @@ if [ -n "$GARDEN_CHANGED" ] && [ "$COGNEE_RUNNING" = true ]; then
 
   # Upload .claude/ files to knowledge-garden dataset
   for file in $(find .claude -type f -name "*.md" | sort); do
-    curl -s -X POST http://localhost:8000/api/v1/add \
+    curl -s -X POST http://localhost:8001/api/v1/add \
       -F "data=@${file}" \
       -F "datasetName=knowledge-garden" > /dev/null
   done
 
-  # Upload .rules/ files to second-brain-patterns dataset
+  # Upload .rules/ files to btc-patterns dataset
   if [ -d .rules ]; then
     for file in $(find .rules -type f -name "*.md" | sort); do
-      curl -s -X POST http://localhost:8000/api/v1/add \
+      curl -s -X POST http://localhost:8001/api/v1/add \
         -F "data=@${file}" \
-        -F "datasetName=second-brain-patterns" > /dev/null
+        -F "datasetName=btc-patterns" > /dev/null
     done
   fi
 
   # Cognify both datasets to create knowledge graphs
-  curl -s -X POST http://localhost:8000/api/v1/cognify \
+  curl -s -X POST http://localhost:8001/api/v1/cognify \
     -H "Content-Type: application/json" \
-    -d '{"datasets": ["knowledge-garden", "second-brain-patterns"]}' > /dev/null
+    -d '{"datasets": ["knowledge-garden", "btc-patterns"]}' > /dev/null
 
   echo "✓ Knowledge garden synced to Cognee"
 elif [ -n "$GARDEN_CHANGED" ]; then
@@ -324,16 +324,16 @@ if [ -n "$CONSTITUTION_CHANGED" ] && [ "$COGNEE_RUNNING" = true ]; then
 
   for file in CONSTITUTION.md VISION.md PLAN.md; do
     if [ -f "$file" ]; then
-      curl -s -X POST http://localhost:8000/api/v1/add \
+      curl -s -X POST http://localhost:8001/api/v1/add \
         -F "data=@${file}" \
-        -F "datasetName=second-brain-constitution" > /dev/null 2>&1
+        -F "datasetName=btc-constitution" > /dev/null 2>&1
     fi
   done
 
   # Cognify constitution dataset
-  curl -s -X POST http://localhost:8000/api/v1/cognify \
+  curl -s -X POST http://localhost:8001/api/v1/cognify \
     -H "Content-Type: application/json" \
-    -d '{"datasets": ["second-brain-constitution"]}' > /dev/null
+    -d '{"datasets": ["btc-constitution"]}' > /dev/null
 
   echo "✓ Constitution synced to Cognee"
 elif [ -n "$CONSTITUTION_CHANGED" ]; then
