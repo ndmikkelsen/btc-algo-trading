@@ -79,9 +79,61 @@ def calculate_bollinger_bands(
     return result
 
 
+def calculate_adx(df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
+    """
+    Calculate ADX (Average Directional Index) for trend strength.
+
+    ADX measures trend strength regardless of direction:
+    - ADX < 20: Weak trend / ranging market
+    - ADX 20-40: Developing trend
+    - ADX > 40: Strong trend
+
+    DI+ and DI- show trend direction:
+    - DI+ > DI-: Uptrend
+    - DI- > DI+: Downtrend
+
+    Args:
+        df: DataFrame with OHLCV columns
+        period: ADX period (default: 14)
+
+    Returns:
+        DataFrame with adx, di_plus, di_minus columns added
+    """
+    result = df.copy()
+
+    # Calculate True Range
+    high_low = result["high"] - result["low"]
+    high_close = abs(result["high"] - result["close"].shift(1))
+    low_close = abs(result["low"] - result["close"].shift(1))
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+
+    # Calculate directional movement
+    up_move = result["high"] - result["high"].shift(1)
+    down_move = result["low"].shift(1) - result["low"]
+
+    # +DM and -DM
+    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0)
+    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0)
+
+    # Smoothed TR, +DM, -DM using Wilder's smoothing
+    atr = pd.Series(tr).ewm(span=period, adjust=False).mean()
+    plus_di = 100 * pd.Series(plus_dm).ewm(span=period, adjust=False).mean() / atr
+    minus_di = 100 * pd.Series(minus_dm).ewm(span=period, adjust=False).mean() / atr
+
+    # DX and ADX
+    dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
+    adx = dx.ewm(span=period, adjust=False).mean()
+
+    result["adx"] = adx
+    result["di_plus"] = plus_di
+    result["di_minus"] = minus_di
+
+    return result
+
+
 def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Add all MACD and Bollinger Band indicators to dataframe.
+    Add all MACD, Bollinger Band, and ADX indicators to dataframe.
 
     Args:
         df: DataFrame with OHLCV columns
@@ -91,4 +143,5 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """
     result = calculate_macd(df)
     result = calculate_bollinger_bands(result)
+    result = calculate_adx(result)
     return result

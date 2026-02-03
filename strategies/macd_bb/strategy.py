@@ -19,6 +19,8 @@ from strategies.macd_bb.config import (
     BB_NEAR_THRESHOLD,
     BB_LOOKBACK,
     EXIT_ON_UPPER_BB,
+    USE_TREND_FILTER,
+    ADX_THRESHOLD,
 )
 from strategies.macd_bb.indicators import add_all_indicators
 from strategies.macd_bb.signals import (
@@ -45,6 +47,15 @@ class MACDBB(IStrategy):
 
     # Can this strategy go short?
     can_short = False
+
+    # ROI targets - take profits at specific levels
+    # Mean reversion strategy: take profits when price bounces back
+    minimal_roi = {
+        "0": 0.04,    # 4% profit anytime
+        "24": 0.03,   # 3% after 24 hours (6 candles)
+        "48": 0.02,   # 2% after 48 hours (12 candles)
+        "72": 0.01,   # 1% after 72 hours (18 candles)
+    }
 
     # Risk management
     stoploss = STOPLOSS
@@ -95,7 +106,8 @@ class MACDBB(IStrategy):
 
         Entry conditions:
         1. MACD line crosses ABOVE signal line (bullish momentum)
-        2. Price is at or below lower Bollinger Band (oversold)
+        2. Price was recently near lower Bollinger Band (oversold)
+        3. NOT in strong downtrend (ADX filter - avoid catching falling knives)
 
         Args:
             dataframe: DataFrame with indicators
@@ -104,7 +116,11 @@ class MACDBB(IStrategy):
         Returns:
             DataFrame with enter_long column
         """
-        dataframe = generate_entry_signal(dataframe)
+        dataframe = generate_entry_signal(
+            dataframe,
+            use_trend_filter=USE_TREND_FILTER,
+            adx_threshold=ADX_THRESHOLD,
+        )
         return dataframe
 
     def populate_exit_trend(

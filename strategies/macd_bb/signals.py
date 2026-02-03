@@ -74,29 +74,43 @@ def detect_bb_position(
     return result
 
 
-def generate_entry_signal(df: pd.DataFrame) -> pd.DataFrame:
+def generate_entry_signal(
+    df: pd.DataFrame,
+    use_trend_filter: bool = True,
+    adx_threshold: float = 25.0,
+) -> pd.DataFrame:
     """
     Generate entry signals.
 
     Entry when:
     - MACD bullish crossover (momentum shift)
     - Price was recently near lower Bollinger Band (oversold condition)
+    - (Optional) Not in strong downtrend (ADX filter)
 
-    This uses a lookback window because MACD crossovers typically occur
-    after price has bounced off the lower BB, not exactly at it.
+    The trend filter avoids "catching falling knives" by blocking entries
+    when ADX > threshold AND DI- > DI+ (strong downtrend).
 
     Args:
-        df: DataFrame with macd_bullish_cross and recent_lower_bb columns
+        df: DataFrame with macd_bullish_cross, recent_lower_bb, adx, di_plus, di_minus
+        use_trend_filter: Whether to apply ADX trend filter
+        adx_threshold: ADX level above which trend filter applies
 
     Returns:
         DataFrame with enter_long column added
     """
     result = df.copy()
 
-    # Entry requires MACD crossover with recent oversold condition
-    result["enter_long"] = (
-        result["macd_bullish_cross"] & result["recent_lower_bb"]
-    ).astype(int)
+    # Base entry: MACD crossover with recent oversold condition
+    base_entry = result["macd_bullish_cross"] & result["recent_lower_bb"]
+
+    if use_trend_filter and "adx" in result.columns:
+        # Block entry in strong downtrends (ADX > threshold AND DI- > DI+)
+        strong_downtrend = (result["adx"] > adx_threshold) & (result["di_minus"] > result["di_plus"])
+        # Allow entry when NOT in strong downtrend
+        trend_ok = ~strong_downtrend
+        result["enter_long"] = (base_entry & trend_ok).astype(int)
+    else:
+        result["enter_long"] = base_entry.astype(int)
 
     return result
 
