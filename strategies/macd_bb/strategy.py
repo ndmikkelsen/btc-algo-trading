@@ -49,12 +49,11 @@ class MACDBB(IStrategy):
     can_short = False
 
     # ROI targets - take profits at specific levels
-    # Mean reversion strategy: take profits when price bounces back
+    # Minimum 2:1 R:R with 5% stop loss = 10% minimum profit target
     minimal_roi = {
-        "0": 0.04,    # 4% profit anytime
-        "24": 0.03,   # 3% after 24 hours (6 candles)
-        "48": 0.02,   # 2% after 48 hours (12 candles)
-        "72": 0.01,   # 1% after 72 hours (18 candles)
+        "0": 0.15,    # 15% profit anytime (3:1 R:R)
+        "72": 0.12,   # 12% after 72 hours (2.4:1 R:R)
+        "144": 0.10,  # 10% after 144 hours - minimum 2:1 R:R
     }
 
     # Risk management

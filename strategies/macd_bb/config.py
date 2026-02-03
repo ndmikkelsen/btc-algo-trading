@@ -18,9 +18,9 @@ EXIT_ON_UPPER_BB = False  # Exit when price reaches upper BB (disabled - use tra
 USE_TREND_FILTER = True  # Enable ADX-based trend filter
 ADX_THRESHOLD = 25.0  # Block entries when ADX > this AND in downtrend
 
-# Risk Management
-STOPLOSS = -0.03  # 3% stop loss
-TAKE_PROFIT = 0.02  # 2% take profit
+# Risk Management (2:1 R:R minimum, 5% capital risk per trade)
+STOPLOSS = -0.05  # 5% stop loss (wider room for mean reversion)
+TAKE_PROFIT = 0.10  # 10% take profit (2:1 R:R with 5% stop)
 TRAILING_STOP = True
-TRAILING_STOP_POSITIVE = 0.015  # 1.5% trailing distance
-TRAILING_STOP_POSITIVE_OFFSET = 0.03  # Activate trailing at 3% profit (let winners run)
+TRAILING_STOP_POSITIVE = 0.03  # 3% trailing distance
+TRAILING_STOP_POSITIVE_OFFSET = 0.10  # Activate trailing at 10% profit (2:1 R:R reached)
