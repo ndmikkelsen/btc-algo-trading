@@ -4,7 +4,7 @@
 
 ## Current Focus
 
-**Implementing Avellaneda-Stoikov Market Making Strategy**
+**Validating A-S Strategy via Paper Trading on Bybit Testnet**
 
 ## Overview
 
@@ -42,29 +42,50 @@ ask = r + δ/2
 
 ## Milestones
 
-### M1: Core Model Implementation
-- [ ] Implement volatility estimation (rolling window)
-- [ ] Implement reservation price calculation
-- [ ] Implement optimal spread calculation
-- [ ] Unit tests for all calculations
+### M1: Core Model Implementation ✅
+- [x] Implement volatility estimation (rolling window)
+- [x] Implement reservation price calculation
+- [x] Implement optimal spread calculation
+- [x] Unit tests for all calculations
+- **Location**: `strategies/avellaneda_stoikov/model.py`
 
-### M2: Order Management
-- [ ] Implement quote generation (bid/ask prices)
-- [ ] Implement inventory tracking
-- [ ] Implement position limits
-- [ ] Implement order placement logic
+### M2: Order Management ✅
+- [x] Implement quote generation (bid/ask prices)
+- [x] Implement inventory tracking
+- [x] Implement position limits
+- [x] Implement order placement logic
+- **Location**: `strategies/avellaneda_stoikov/order_manager.py`
 
-### M3: Backtesting Framework
-- [ ] Build market making backtester (different from directional)
-- [ ] Simulate order fills based on price movement
-- [ ] Track P&L including spread capture
-- [ ] Generate performance metrics
+### M3: Backtesting Framework ✅
+- [x] Build market making backtester (different from directional)
+- [x] Simulate order fills based on price movement
+- [x] Track P&L including spread capture
+- [x] Generate performance metrics
+- **Location**: `strategies/avellaneda_stoikov/simulator.py`, `scripts/run_as_backtest.py`
 
-### M4: Parameter Optimization
-- [ ] Tune risk aversion (γ)
-- [ ] Tune volatility window
-- [ ] Tune order book liquidity (κ)
-- [ ] Optimize for Sharpe ratio
+### M4: Parameter Optimization ✅
+- [x] Tune risk aversion (γ) → 0.1
+- [x] Tune volatility window → 20 candles
+- [x] Tune order book liquidity (κ) → 1.5
+- [x] Optimize for Sharpe ratio
+- **Result**: +43.52% annual return in ranging markets (ADX < 25)
+- **Location**: `strategies/avellaneda_stoikov/config_optimized.py`
+
+### M5: Paper Trading Validation 🔄
+- [ ] Run paper trader on Bybit testnet for 1+ week
+- [ ] Monitor fill rates and spread capture
+- [ ] Validate inventory management in live conditions
+- [ ] Compare live P&L vs backtest expectations
+- [ ] Identify execution issues (latency, WebSocket stability)
+- **Location**: `scripts/run_paper_trader.py`, `strategies/avellaneda_stoikov/live_trader.py`
+
+### M6: Live Trading Deployment
+- [ ] Create Bybit mainnet API keys
+- [ ] Configure secure credential management
+- [ ] Set initial capital allocation ($500-1000)
+- [ ] Implement kill switch / emergency stop
+- [ ] Set up monitoring and alerting
+- [ ] Document risk limits and stop-loss rules
 
 ## Parameters
 
@@ -83,8 +104,24 @@ ask = r + δ/2
 | 2026-01-30 | Target 2012+ data | Covers all major market regimes |
 | 2026-01-30 | Test momentum + mean reversion + hybrid | Research shows hybrid outperforms single strategies |
 | 2026-02-01 | Implement Cognee knowledge base | AI memory layer for semantic search over strategies, backtests, and session history |
+| 2026-02-01 | Abandon BTCMomentumScalper | Poor backtest results: -12% bull market, +0.36% bear market |
+| 2026-02-01 | Focus on Avellaneda-Stoikov | Mathematical market making model with better risk-adjusted returns |
+| 2026-02-03 | Use Bybit for trading | Testnet available, good API, WebSocket support |
+| 2026-02-03 | Trade only ranging markets | ADX < 25 filter critical - strategy fails in trending markets |
 
 ## Recent Milestones
+
+### Avellaneda-Stoikov Implementation (2026-02-01 - 2026-02-03) ✅
+
+Complete market making infrastructure:
+- **Core model** (246 lines): Reservation price, optimal spread, quote calculations
+- **Order management** (408 lines): Order tracking, inventory, P&L management
+- **Backtesting** (450 lines): Market simulator with regime detection
+- **Live trading** (444 lines): Bybit WebSocket integration for real-time trading
+- **Risk management** (256 lines): 4% risk/trade, 2:1 R:R, position limits
+- **Regime detection** (233 lines): ADX-based filter for ranging markets
+- **127 unit tests** covering all modules
+- **3 config profiles**: base, HFT, optimized
 
 ### Cognee Integration (2026-02-01) ✅
 
@@ -96,9 +133,15 @@ Implemented isolated Cognee stack for btc-algo-trading knowledge base:
 
 ## Open Questions
 
-- Which exchange for live trading? (Binance, Kraken, Coinbase)
-- Position sizing strategy?
-- Risk management rules (max drawdown, stop-loss)?
+- ~~Which exchange for live trading?~~ → **Bybit** (testnet available, good API)
+- ~~Position sizing strategy?~~ → **4% risk per trade, 2:1 R:R**
+- ~~Risk management rules?~~ → **Implemented in risk_manager.py**
+
+### New Questions
+- How long should paper trading validation run before going live?
+- What's the minimum capital for meaningful live testing?
+- Should we add more trading pairs beyond BTC/USDT?
+- How to handle extended trending periods (strategy doesn't trade)?
 
 ## Resources
 
