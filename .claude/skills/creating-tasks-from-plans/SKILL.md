@@ -168,9 +168,21 @@ btc-algo-jkl: Add RSI confirmation filter (P1)
   └── depends on: btc-algo-abc, btc-algo-ghi
 ```
 
+## Integration with BDD Workflow
+
+When creating tasks from a `.plan.md` that was generated from a `.feature` file:
+
+1. Reference the `.feature` file in task descriptions
+2. Each task's acceptance criteria should map to specific Gherkin scenarios
+3. Implementation tasks should follow `/implementing-with-tdd` (red-green-refactor)
+
+```
+.feature → .plan.md → bd tasks (THIS SKILL) → /implementing-with-tdd
+```
+
 ## After Task Creation
 
 1. Run `bd ready` to see which tasks are unblocked
 2. Claim a task: `bd update <id> --status in_progress`
-3. Implement using TDD (red-green-refactor)
+3. Implement using TDD (red-green-refactor): `/implementing-with-tdd`
 4. Close when done: `bd close <id>`

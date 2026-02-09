@@ -30,6 +30,60 @@ second-brain/
 | Session completion | `.claude/commands/land.md` | /land protocol |
 | Search knowledge | `.claude/commands/query.md` | /query command |
 
+## Development Workflow
+
+### BDD/TDD Pipeline (MANDATORY for features)
+
+All new features follow this pipeline:
+
+```
+beads epic/task
+    ↓  /creating-features-from-tasks
+.feature file (Gherkin scenarios)
+    ↓  /planning-features
+.plan.md (implementation plan)
+    ↓  /creating-tasks-from-plans
+beads tasks (with dependencies)
+    ↓  /implementing-with-tdd
+test_*.py + production code (red-green-refactor)
+```
+
+### Red-Green-Refactor Protocol
+
+| Phase | Action | Verification |
+|-------|--------|-------------|
+| RED | Write failing test | `pytest` fails for the right reason |
+| GREEN | Write minimal code to pass | `pytest` passes |
+| REFACTOR | Improve code quality | `pytest` still passes |
+
+### AI Skills for BDD
+
+| Skill | Purpose | Trigger |
+|-------|---------|---------|
+| `/creating-features-from-tasks` | Create `.feature` from beads task | "create feature file", "write scenarios" |
+| `/planning-features` | Create `.plan.md` from `.feature` | "plan this feature" |
+| `/planning-from-tasks` | Create `.plan.md` from beads epic (no BDD) | "plan this epic" |
+| `/creating-tasks-from-plans` | Create beads tasks from `.plan.md` | "create tasks from plan" |
+| `/implementing-with-tdd` | TDD implementation of beads tasks | "implement this task", "TDD this" |
+
+### Agent Conventions
+
+Claude agent teams MUST follow these conventions:
+
+1. **Use beads for ALL task tracking** - `bd create`, `bd update`, `bd close`
+2. **Use cognee for knowledge queries** - `/query` before planning, after discovering patterns
+3. **BDD for features** - All features start with `.feature` files
+4. **TDD for implementation** - Red-green-refactor, no exceptions
+5. **Complete sessions with /land** - Never skip the landing protocol
+
+### Test File Locations
+
+| Type | Location | Framework |
+|------|----------|-----------|
+| BDD feature tests | `features/<domain>/test_*.py` | pytest-bdd |
+| Unit tests | `tests/unit/<module>/test_*.py` | pytest |
+| Integration tests | `tests/integration/test_*.py` | pytest |
+
 ## Quick Commands
 
 ### Beads (Issue Tracking)
@@ -282,6 +336,16 @@ Work is **NOT complete** until `git push` succeeds:
 
 See [.claude/commands/land.md](.claude/commands/land.md) for complete protocol.
 
+## Testing (Non-Negotiables)
+
+- **BDD for features** - All features start with `.feature` files
+- **TDD for implementation** - Red-green-refactor, no exceptions
+- **.plan.md for complex features** - Design before code
+- **Test files colocated** - BDD tests in `features/`, unit tests in `tests/`
+- **Mock external services** - No real API calls in unit tests
+- **Use pytest** for all testing
+- **Test edge cases** - Errors, boundary conditions, empty states
+
 ## Anti-Patterns (NEVER)
 
 | Rule | Why |
@@ -290,6 +354,9 @@ See [.claude/commands/land.md](.claude/commands/land.md) for complete protocol.
 | Skip /land protocol | Work not complete |
 | Unpushed commits | Session incomplete |
 | Direct main/dev commits | Use topic branches + PR |
+| Write code before tests | Use TDD red-green-refactor |
+| Skip .feature files for features | Use BDD pipeline |
+| Ad-hoc task tracking | Use Beads exclusively |
 
 ## Constitution + Cognee Integration
 

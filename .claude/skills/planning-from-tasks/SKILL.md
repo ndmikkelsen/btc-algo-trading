@@ -18,10 +18,14 @@ Create comprehensive implementation plans from beads epics or feature tasks.
 ## Workflow
 
 1. **Read the beads issue** - `bd show <epic-id>` to understand scope
-2. **Analyze requirements** - Identify technical needs, dependencies, constraints
-3. **Research codebase** - Find similar patterns, existing utilities, conventions
-4. **Draft the plan** - Use template below
-5. **Review with user** - Confirm design decisions before finalizing
+2. **Query knowledge** - `/query` for relevant patterns, prior art, architecture
+3. **Check for .feature file** - If a `.feature` file exists, use `/planning-features` instead
+4. **Analyze requirements** - Identify technical needs, dependencies, constraints
+5. **Research codebase** - Find similar patterns, existing utilities, conventions
+6. **Draft the plan** - Use template below
+7. **Review with user** - Confirm design decisions before finalizing
+
+**Note**: For features that already have a `.feature` file, use the `/planning-features` skill instead. This skill is for planning directly from beads epics/tasks that don't yet have Gherkin scenarios.
 
 ## Output Location
 

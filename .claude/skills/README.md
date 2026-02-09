@@ -6,28 +6,71 @@ Skills are reusable workflows for common tasks. They provide structured approach
 
 ### Development Workflow
 
-These skills form a complete TDD development cycle:
+These skills form a complete BDD/TDD development cycle:
 
 ```
-beads epic → planning-from-tasks → .plan.md → creating-tasks-from-plans → beads tasks → implementing-with-tdd
+beads epic/task
+    ↓  /creating-features-from-tasks
+.feature file (Gherkin scenarios)
+    ↓  /planning-features
+.plan.md (implementation plan)
+    ↓  /creating-tasks-from-plans
+beads tasks (with dependencies)
+    ↓  /implementing-with-tdd
+test_*.py + production code (red-green-refactor)
 ```
 
-#### 1. planning-from-tasks
+**Alternative path** (for tasks without BDD):
 
-**Purpose**: Create detailed implementation plans from beads epics
+```
+beads epic → /planning-from-tasks → .plan.md → /creating-tasks-from-plans → /implementing-with-tdd
+```
+
+#### 1. creating-features-from-tasks
+
+**Purpose**: Create Gherkin `.feature` files from beads tasks/epics
 
 **When to use**:
 
-- Starting work on a new feature or epic
-- Need to break down a large task into phases
-- Want to document design decisions before coding
+- Starting the BDD cycle for a new feature
+- A beads issue describes behavior but no `.feature` file exists
+- Want to define acceptance criteria as scenarios
+
+**Input**: Beads task/epic ID
+**Output**: `features/<domain>/<feature-name>.feature`
+
+**Triggers**: "create feature file", "write scenarios for", "convert this epic to BDD"
+
+#### 2. planning-features
+
+**Purpose**: Create implementation plans from `.feature` files
+
+**When to use**:
+
+- A `.feature` file exists and needs an implementation plan
+- Starting work on a feature with Gherkin scenarios
+- Need to document design decisions before coding
+
+**Input**: `.feature` file
+**Output**: `{feature-name}.plan.md` alongside the `.feature` file
+
+**Triggers**: "plan this feature", "create implementation plan", "how should we implement"
+
+#### 2b. planning-from-tasks
+
+**Purpose**: Create implementation plans directly from beads epics (without BDD)
+
+**When to use**:
+
+- No `.feature` file exists yet
+- Planning infrastructure/tooling work (not behavior-driven)
 
 **Input**: Beads epic ID
 **Output**: `{feature}.plan.md` file
 
-**Triggers**: "plan this epic", "create implementation plan", "how should we implement"
+**Triggers**: "plan this epic", "create implementation plan"
 
-#### 2. creating-tasks-from-plans
+#### 3. creating-tasks-from-plans
 
 **Purpose**: Generate beads tasks from `.plan.md` files
 
@@ -42,7 +85,7 @@ beads epic → planning-from-tasks → .plan.md → creating-tasks-from-plans �
 
 **Triggers**: "create tasks from plan", "break down the plan", "generate beads issues"
 
-#### 3. implementing-with-tdd
+#### 4. implementing-with-tdd
 
 **Purpose**: Implement tasks using strict TDD red-green-refactor
 
@@ -80,20 +123,23 @@ beads epic → planning-from-tasks → .plan.md → creating-tasks-from-plans �
 
 ## Workflow Examples
 
-### Complete Feature Development
+### Complete Feature Development (BDD Pipeline)
 
 ```bash
 # 1. Create epic in beads
 bd create --title="New Strategy Feature" --type=feature --priority=1
 
-# 2. Plan the feature (planning-from-tasks skill)
+# 2. Create .feature file (/creating-features-from-tasks skill)
 bd show <epic-id>
-# Creates: docs/plans/new-strategy.plan.md
+# Creates: features/trading/new-strategy.feature
 
-# 3. Create tasks from plan (creating-tasks-from-plans skill)
+# 3. Plan the feature (/planning-features skill)
+# Creates: features/trading/new-strategy.plan.md
+
+# 4. Create tasks from plan (/creating-tasks-from-plans skill)
 # Creates beads tasks with dependencies
 
-# 4. Implement with TDD (implementing-with-tdd skill)
+# 5. Implement with TDD (/implementing-with-tdd skill)
 bd ready                           # Find available work
 bd update <task-id> --status in_progress
 pytest                             # RED: write failing test

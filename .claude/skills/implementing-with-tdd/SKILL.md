@@ -19,8 +19,10 @@ Strict red-green-refactor implementation of beads tasks.
 Before writing ANY production code:
 
 - [ ] Read the beads task: `bd show <task-id>`
+- [ ] Read related .feature file (if BDD workflow)
 - [ ] Read related .plan.md (if it exists)
-- [ ] Identify one test to implement next (single increment)
+- [ ] Query knowledge: `/query` for relevant domain context
+- [ ] Identify one test/scenario to implement next (single increment)
 - [ ] Claim the task: `bd update <task-id> --status in_progress`
 
 ## TDD Cycle (MANDATORY)
@@ -45,6 +47,46 @@ Before writing ANY production code:
 3. Stop and ask for approval before expanding scope beyond the original test
 
 ## Implementation Patterns
+
+### BDD Scenarios (features/test_*.py)
+
+Implement step definitions for pytest-bdd scenarios:
+
+```python
+import pytest
+from pytest_bdd import scenarios, given, when, then, parsers
+from strategies.avellaneda_stoikov.model import AvellanedaStoikov
+
+# Load scenarios from .feature file
+scenarios("market-making.feature")
+
+
+class Context:
+    """Mutable container for passing data between steps."""
+    def __init__(self):
+        self.model = None
+        self.result = None
+
+
+@pytest.fixture
+def ctx():
+    return Context()
+
+
+@given("a default Avellaneda-Stoikov model")
+def given_default_model(ctx):
+    ctx.model = AvellanedaStoikov()
+
+
+@when(parsers.parse("I calculate the spread with volatility {vol:g}"))
+def when_calculate_spread(ctx, vol):
+    ctx.result = ctx.model.calculate_optimal_spread(vol, 0.5)
+
+
+@then("the spread should be positive")
+def then_spread_positive(ctx):
+    assert ctx.result > 0
+```
 
 ### Strategy Tests (strategies/test_*.py)
 
