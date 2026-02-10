@@ -124,11 +124,11 @@ class AvellanedaStoikov:
         Returns:
             Reservation price (r)
         """
-        # r = S - q * γ * σ² * (T - t)
+        # r = S - q * γ * σ² * (T - t)  [Paper's exact formula]
         variance = volatility ** 2
         adjustment = inventory * self.risk_aversion * variance * time_remaining
 
-        reservation_price = mid_price - (mid_price * adjustment)
+        reservation_price = mid_price - adjustment
 
         return reservation_price
 
@@ -165,9 +165,6 @@ class AvellanedaStoikov:
 
         spread = inventory_term + adverse_selection_term
 
-        # Apply bounds
-        spread = max(self.min_spread, min(self.max_spread, spread))
-
         return spread
 
     def calculate_quotes(
@@ -197,8 +194,13 @@ class AvellanedaStoikov:
         # Calculate optimal spread
         spread = self.calculate_optimal_spread(volatility, time_remaining)
 
-        # Calculate bid and ask
-        half_spread = (mid_price * spread) / 2
+        # The formula returns spread in absolute price units.
+        # Normalize to a fraction of mid_price, then clamp to bounds.
+        spread_pct = spread / mid_price
+        spread_pct = max(self.min_spread, min(self.max_spread, spread_pct))
+
+        # Apply spread as dollar half-spread around reservation price
+        half_spread = (mid_price * spread_pct) / 2
         bid_price = reservation_price - half_spread
         ask_price = reservation_price + half_spread
 
@@ -226,7 +228,9 @@ class AvellanedaStoikov:
         reservation_price = self.calculate_reservation_price(
             mid_price, inventory, volatility, time_remaining
         )
-        spread = self.calculate_optimal_spread(volatility, time_remaining)
+        raw_spread = self.calculate_optimal_spread(volatility, time_remaining)
+        spread_pct = raw_spread / mid_price
+        spread_pct = max(self.min_spread, min(self.max_spread, spread_pct))
         bid, ask = self.calculate_quotes(
             mid_price, inventory, volatility, time_remaining
         )
@@ -234,8 +238,8 @@ class AvellanedaStoikov:
         return {
             "mid_price": mid_price,
             "reservation_price": reservation_price,
-            "spread": spread,
-            "spread_bps": spread * 10000,  # Basis points
+            "spread": spread_pct,
+            "spread_bps": spread_pct * 10000,  # Basis points
             "bid": bid,
             "ask": ask,
             "inventory": inventory,

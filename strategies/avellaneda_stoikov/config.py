@@ -94,3 +94,23 @@ ADX_PERIOD = 14
 
 # Reduce position size in trending markets by this factor
 TREND_POSITION_SCALE = 0.5
+
+# =============================================================================
+# Realistic Fill Model Parameters
+# =============================================================================
+
+# Fill aggressiveness: controls fill probability based on price penetration
+# P(fill) = min(1.0, penetration_pct * FILL_AGGRESSIVENESS)
+# Higher = more fills (less conservative)
+FILL_AGGRESSIVENESS = 10.0
+
+# Maximum slippage as a percentage of price
+# Actual slippage is uniform random between 0 and max_slippage * price
+MAX_SLIPPAGE_PCT = 0.0001  # 0.01%
+
+# =============================================================================
+# Stop-Loss Parameters
+# =============================================================================
+
+# Stop-loss percentage: force-close if unrealized loss exceeds this
+STOP_LOSS_PCT = 0.005  # 0.5%

@@ -200,29 +200,35 @@ class TestOptimalSpread:
 
         assert spread_high_liq < spread_low_liq
 
-    def test_spread_respects_minimum(self):
-        """Spread should not go below minimum."""
+    def test_spread_clamped_to_minimum_in_quotes(self):
+        """Spread is clamped to minimum when applied in calculate_quotes."""
         model = AvellanedaStoikov(
             risk_aversion=0.001,  # Very low
             order_book_liquidity=100.0,  # Very high
             min_spread=0.001
         )
 
-        spread = model.calculate_optimal_spread(0.001, 0.01)
+        mid_price = 50000.0
+        bid, ask = model.calculate_quotes(mid_price, 0, 0.001, 0.01)
 
-        assert spread >= 0.001
+        # The effective spread percentage should respect min_spread
+        effective_spread_pct = (ask - bid) / mid_price
+        assert effective_spread_pct >= 0.001 - 1e-9
 
-    def test_spread_respects_maximum(self):
-        """Spread should not exceed maximum."""
+    def test_spread_clamped_in_quotes(self):
+        """Spread is clamped to max when applied in calculate_quotes."""
         model = AvellanedaStoikov(
             risk_aversion=10.0,  # Very high
             order_book_liquidity=0.01,  # Very low
             max_spread=0.05
         )
 
-        spread = model.calculate_optimal_spread(0.5, 1.0)
+        mid_price = 50000.0
+        bid, ask = model.calculate_quotes(mid_price, 0, 0.5, 1.0)
 
-        assert spread <= 0.05
+        # The effective spread percentage should respect max_spread
+        effective_spread_pct = (ask - bid) / mid_price
+        assert effective_spread_pct <= 0.05 + 1e-9
 
 
 class TestQuoteGeneration:
@@ -246,8 +252,8 @@ class TestQuoteGeneration:
 
         assert bid < r < ask
 
-    def test_ask_minus_bid_equals_spread(self):
-        """Ask - Bid should equal the optimal spread."""
+    def test_ask_minus_bid_reflects_clamped_spread(self):
+        """Ask - Bid should reflect the normalized and clamped spread."""
         model = AvellanedaStoikov(risk_aversion=0.1, order_book_liquidity=1.5)
         mid_price = 50000.0
         inventory = 0
@@ -257,9 +263,12 @@ class TestQuoteGeneration:
         bid, ask = model.calculate_quotes(
             mid_price, inventory, volatility, time_remaining
         )
-        spread = model.calculate_optimal_spread(volatility, time_remaining)
+        raw_spread = model.calculate_optimal_spread(volatility, time_remaining)
+        spread_pct = raw_spread / mid_price
+        spread_pct = max(model.min_spread, min(model.max_spread, spread_pct))
+        expected_dollar_spread = mid_price * spread_pct
 
-        assert abs((ask - bid) - (mid_price * spread)) < 0.01  # Allow small float error
+        assert abs((ask - bid) - expected_dollar_spread) < 0.01
 
     def test_long_inventory_shifts_quotes_down(self):
         """Long inventory should shift both quotes down (want to sell)."""
