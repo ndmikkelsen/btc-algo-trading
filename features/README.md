@@ -1,36 +1,41 @@
 # Features (BDD)
 
-Gherkin `.feature` files and their implementation plans for behavior-driven development.
+Gherkin `.feature` files and their implementation plans for behavior-driven development of trading strategies.
 
 ## Directory Structure
 
 ```
 features/
-├── README.md              ← This file (workflow docs + .plan.md template)
-├── conftest.py            ← Shared BDD fixtures
-├── trading/               ← Trading strategy features
+├── README.md              <- This file
+├── conftest.py            <- SHARED fixtures (model instances, price data, Given/Then)
+├── trading/               <- Market making and quoting
 │   ├── market-making.feature
-│   ├── test_market_making.py
+│   ├── market-making.plan.md
+│   └── test_market_making.py    <- scenarios(".") + domain-specific steps
+├── backtesting/           <- Fill models and simulation
 │   └── ...
-├── backtesting/           ← Backtesting pipeline features
+├── data/                  <- Order book and exchange data
 │   └── ...
-└── risk/                  ← Risk management features
+├── risk/                  <- Position management and risk
+│   └── ...
+└── infra/                 <- Connectivity and monitoring
     └── ...
 ```
 
-## BDD Workflow
+## BDD Pipeline
 
 ```
-beads epic/task
-    ↓  /creating-features-from-tasks
-.feature file (Gherkin scenarios)
-    ↓  /planning-features
-.plan.md (implementation plan)
-    ↓  /creating-tasks-from-plans
-beads tasks (with dependencies)
-    ↓  /implementing-with-tdd
-test_*.py + production code (red-green-refactor)
+beads issue -> .feature spec -> .plan.md -> tasks -> TDD implementation
+   (Define)     (Specify)      (Plan)    (Break)    (Build)
 ```
+
+| Stage | Skill | Input | Output |
+|-------|-------|-------|--------|
+| Define | `bd create` | Problem/need | Beads issue |
+| Specify | `/creating-features-from-tasks` | Beads issue | `.feature` file |
+| Plan | `/planning-features` | `.feature` file | `.plan.md` |
+| Break | `/creating-tasks-from-plans` | `.plan.md` | Beads tasks |
+| Build | `/implementing-with-tdd` | Beads task | Code + passing tests |
 
 ## File Conventions
 
@@ -39,6 +44,20 @@ test_*.py + production code (red-green-refactor)
 | `{name}.feature` | Gherkin scenarios | `/creating-features-from-tasks` |
 | `{name}.plan.md` | Implementation plan | `/planning-features` |
 | `test_{name}.py` | pytest-bdd step implementations | `/implementing-with-tdd` |
+
+## Step Definition Architecture
+
+**Shared steps** (`conftest.py`):
+- Model fixtures (`as_model`, `as_model_custom`)
+- Price data fixtures (`sample_prices`, `trending_prices`, `stable_prices`, `sample_ohlcv`)
+- Common Given/When/Then steps used across multiple features
+
+**Feature-specific steps** (`test_<name>.py`):
+- Steps unique to that feature domain
+- `scenarios(".")` call to register the `.feature` file
+- Domain-specific Context class
+
+**IMPORTANT**: Always use `scenarios(".")` (not explicit file paths) for portability.
 
 ## Running BDD Tests
 
@@ -54,112 +73,126 @@ pytest features/trading/
 
 # Specific feature
 pytest features/trading/test_market_making.py
+
+# Collect without running (verify parsing)
+pytest features/ --collect-only
 ```
+
+## Feature Domains
+
+| Domain | Directory | Examples |
+|--------|-----------|---------|
+| Trading | `trading/` | Spread calc, inventory mgmt, order placement |
+| Backtesting | `backtesting/` | Fill models, walk-forward, Monte Carlo |
+| Risk | `risk/` | Position sizing, stop-loss, drawdown limits |
+| Data | `data/` | Order book capture, multi-exchange, validation |
+| Infrastructure | `infra/` | Exchange connectivity, monitoring, alerts |
 
 ## .plan.md Template
 
-Use this template when creating implementation plans with `/planning-features`:
+When creating implementation plans with `/planning-features`, use this template:
 
 ```markdown
-# {Feature Name} Implementation Plan
+# {Feature Title} - Implementation Plan
 
-**Feature**: features/{domain}/{feature-name}.feature
-**Epic**: {beads-id}
-**Created**: {date}
-**Status**: Draft | In Review | Approved
-
-## Overview
-
-{1-2 paragraph summary of what this feature does and why it matters}
-
-## Goals
-
-### Primary
-- {Main objective}
-
-### Secondary
-- {Supporting objectives}
+**Beads Issue**: {task-id}
+**Feature Spec**: `features/<domain>/<feature-name>.feature`
+**Created**: {DATE}
+**Status**: Draft | Approved | In Progress | Complete
 
 ## User Stories
 
-- As a {role}, I want {capability} so that {benefit}
+> As a {role}
+> I want {capability}
+> So that {benefit}
+
+## Feature Scenarios
+
+Maps scenarios to implementation phases:
+
+| Scenario | Phase | Tasks |
+|----------|-------|-------|
+| {Scenario name} | Phase {N} | {What to do} |
+
+### Definition of Done
+All scenarios in `features/<domain>/<feature-name>.feature` pass green:
+pytest features/<domain>/ -v
 
 ## Design Decisions
 
-### {Decision 1 Title}
-
-**Context**: {Why this decision is needed}
-
-**Options Considered**:
-1. {Option A} - {pros/cons}
-2. {Option B} - {pros/cons}
-
-**Decision**: {What we chose}
-
-**Consequences**: {Trade-offs and implications}
-
-## Technical Specifications
-
-### Indicators
-- {Technical indicators and parameters}
-
-### Entry/Exit Logic
-- {Conditions in plain language}
-
-### Risk Parameters
-- {Stoploss, ROI targets, position sizing}
-
-### Data Requirements
-- {Data sources, timeframes, format}
+### {Decision Title}
+**Context**: {Why needed}
+**Options**: 1. {A} 2. {B}
+**Decision**: {Chosen}
+**Rationale**: {Why}
 
 ## Implementation Plan
 
 ### Phase 1: {Foundation}
+1. [ ] {Task -- linked to scenario(s)}
 
-1. [ ] {Task 1}
-2. [ ] {Task 2}
+### Phase 2: {Core}
+1. [ ] {Task -- linked to scenario(s)}
 
-### Phase 2: {Core Implementation}
+## Risks & Mitigations
 
-1. [ ] {Task 3}
-2. [ ] {Task 4}
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+```
 
-### Phase 3: {Integration & Testing}
+## Gherkin Conventions for Trading
 
-1. [ ] {Task 5}
-2. [ ] {Task 6}
+### Spread Calculation
 
-## Risk Assessment
+```gherkin
+Scenario: Spread widens with higher volatility
+  Given a BTC mid price of 50000
+  And a default Avellaneda-Stoikov model
+  And a volatility of 0.02
+  And a time remaining of 0.5
+  When I calculate the optimal spread at this volatility
+  And I recalculate with a volatility of 0.05
+  Then the second spread should be wider than the first
+```
 
-| Risk | Likelihood | Impact | Mitigation |
-|------|------------|--------|------------|
-| {Risk 1} | Low/Med/High | Low/Med/High | {Strategy} |
+### Inventory Management
 
-## Constraints
+```gherkin
+Scenario: Long inventory shifts quotes downward
+  Given a BTC mid price of 50000
+  And a default Avellaneda-Stoikov model
+  And a volatility of 0.02
+  And a time remaining of 0.5
+  When I calculate quotes with inventory 0
+  And I calculate quotes with inventory 5
+  Then the long-inventory bid should be lower than the neutral bid
+```
 
-- {Performance requirements}
-- {Exchange limitations}
-- {Capital constraints}
+### Fill Model Validation
 
-## Dependencies
+```gherkin
+Scenario Outline: Fill probability decreases with distance from mid
+  Given an order book with spread <spread>
+  And an order placed <distance> from mid price
+  When I estimate the fill probability
+  Then the fill probability should be less than <max_prob>
 
-- {External libraries}
-- {Internal modules}
-- {Blocking tasks}
+  Examples:
+    | spread | distance | max_prob |
+    | 0.01%  | 0.005%   | 0.8      |
+    | 0.01%  | 0.02%    | 0.3      |
+    | 0.01%  | 0.05%    | 0.1      |
+```
 
-## Definition of Done
+### Risk Management
 
-- [ ] All scenarios in {feature-name}.feature pass
-- [ ] All existing tests still pass (`pytest`)
-- [ ] No lint errors (`ruff check .`)
-- [ ] No type errors (`mypy strategies/`)
-- [ ] Documentation updated
-- [ ] Backtest results validated (if applicable)
-
-## Open Questions
-
-- {Question 1}
-- {Question 2}
+```gherkin
+Scenario: Stop-loss triggers at threshold
+  Given a position of 1.0 BTC at entry price 50000
+  And a stop-loss threshold of 2%
+  When the price drops to 48900
+  Then the stop-loss should trigger
+  And the position should be closed
 ```
 
 ## Writing Good Scenarios
@@ -167,10 +200,11 @@ Use this template when creating implementation plans with `/planning-features`:
 ### Do
 
 - Focus on behavior, not implementation
-- Use domain language (spread, inventory, volatility)
+- Use domain language (spread, inventory, volatility, kappa)
 - One behavior per scenario
 - Include edge cases (zero inventory, extreme volatility)
 - Keep scenarios independent
+- Use Scenario Outline for parametrized tests
 
 ### Don't
 
@@ -178,3 +212,10 @@ Use this template when creating implementation plans with `/planning-features`:
 - Combine multiple behaviors
 - Skip error scenarios
 - Use technical jargon over domain language
+- Use explicit file paths in `scenarios()` calls
+
+## Related Documentation
+
+- [BDD Workflow](../.rules/patterns/bdd-workflow.md) - Full technical reference
+- [Beads Integration](../.rules/patterns/beads-integration.md) - Issue tracking
+- [Skills README](../.claude/skills/README.md) - Skill pipeline overview

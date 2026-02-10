@@ -1,3 +1,4 @@
+@trading
 Feature: Avellaneda-Stoikov Market Making
   As a market maker
   I want to calculate optimal bid and ask quotes
