@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""Run Avellaneda-Stoikov paper trader on Bybit testnet.
+"""Run market making paper trader on Bybit testnet.
 
 Usage:
-    python scripts/run_paper_trader.py
+    python scripts/run_paper_trader.py                        # GLFT with live kappa
+    python scripts/run_paper_trader.py --model=as             # A-S model
+    python scripts/run_paper_trader.py --fee-tier=vip1        # VIP1 fees
+    python scripts/run_paper_trader.py --kappa=constant       # Fixed kappa
 
 Environment variables:
     BYBIT_API_KEY - Your Bybit testnet API key
@@ -16,21 +19,90 @@ To get testnet API keys:
     5. Set environment variables or create a .env file
 """
 
+import argparse
 import os
 import sys
 import signal
+
 from dotenv import load_dotenv
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from strategies.avellaneda_stoikov.glft_model import GLFTModel
+from strategies.avellaneda_stoikov.model import AvellanedaStoikov
+from strategies.avellaneda_stoikov.fee_model import FeeModel, FeeTier
+from strategies.avellaneda_stoikov.kappa_provider import ConstantKappaProvider
 from strategies.avellaneda_stoikov.live_trader import LiveTrader
+
+
+FEE_TIER_MAP = {
+    "regular": FeeTier.REGULAR,
+    "vip1": FeeTier.VIP1,
+    "vip2": FeeTier.VIP2,
+    "market_maker": FeeTier.MARKET_MAKER,
+}
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Run market making paper trader on Bybit testnet.",
+    )
+    parser.add_argument(
+        "--model",
+        choices=["glft", "as"],
+        default="glft",
+        help="Market making model: glft (default) or as (Avellaneda-Stoikov)",
+    )
+    parser.add_argument(
+        "--fee-tier",
+        choices=list(FEE_TIER_MAP.keys()),
+        default="regular",
+        help="Bybit fee tier (default: regular)",
+    )
+    parser.add_argument(
+        "--kappa",
+        choices=["live", "constant"],
+        default="live",
+        help="Kappa calibration mode: live (default) or constant",
+    )
+    parser.add_argument(
+        "--capital",
+        type=float,
+        default=1000.0,
+        help="Initial capital in USDT (default: 1000)",
+    )
+    parser.add_argument(
+        "--order-size",
+        type=float,
+        default=0.003,
+        help="Order size in BTC (default: 0.003)",
+    )
+    parser.add_argument(
+        "--interval",
+        type=float,
+        default=5.0,
+        help="Quote update interval in seconds (default: 5.0)",
+    )
+    parser.add_argument(
+        "--no-regime-filter",
+        action="store_true",
+        help="Disable regime detection filter",
+    )
+    return parser.parse_args()
+
+
+def build_model(model_name: str):
+    """Create the market making model."""
+    if model_name == "glft":
+        return GLFTModel()
+    return AvellanedaStoikov()
 
 
 def main():
     """Run the paper trader."""
-    # Load environment variables
     load_dotenv()
+    args = parse_args()
 
     api_key = os.getenv("BYBIT_API_KEY")
     api_secret = os.getenv("BYBIT_API_SECRET")
@@ -56,16 +128,26 @@ def main():
         print("=" * 60)
         sys.exit(1)
 
+    model = build_model(args.model)
+    fee_model = FeeModel(FEE_TIER_MAP[args.fee_tier])
+
+    # For constant kappa, pass an explicit provider; for live mode,
+    # LiveTrader creates a LiveKappaProvider backed by its internal collector
+    kappa_provider = ConstantKappaProvider() if args.kappa == "constant" else None
+
     # Create trader
     trader = LiveTrader(
         api_key=api_key,
         api_secret=api_secret,
         testnet=True,  # Always use testnet for paper trading
         symbol="BTCUSDT",
-        initial_capital=1000.0,
-        order_size=0.003,  # 0.003 BTC
-        use_regime_filter=True,
-        quote_interval=5.0,
+        initial_capital=args.capital,
+        order_size=args.order_size,
+        use_regime_filter=not args.no_regime_filter,
+        quote_interval=args.interval,
+        model=model,
+        fee_model=fee_model,
+        kappa_provider=kappa_provider,
     )
 
     # Handle graceful shutdown

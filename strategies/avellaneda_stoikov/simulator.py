@@ -11,7 +11,7 @@ import random
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
-from strategies.avellaneda_stoikov.model import AvellanedaStoikov
+from strategies.avellaneda_stoikov.base_model import MarketMakingModel
 from strategies.avellaneda_stoikov.order_manager import OrderManager, OrderSide
 from strategies.avellaneda_stoikov.regime import RegimeDetector, MarketRegime
 from strategies.avellaneda_stoikov.config import (
@@ -40,7 +40,7 @@ class MarketSimulator:
 
     def __init__(
         self,
-        model: AvellanedaStoikov,
+        model: MarketMakingModel,
         order_manager: OrderManager,
         session_length: float = SESSION_LENGTH,
         order_size: float = ORDER_SIZE,

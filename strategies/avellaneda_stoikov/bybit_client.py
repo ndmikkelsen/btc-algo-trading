@@ -14,8 +14,13 @@ import requests
 import websocket
 import threading
 from typing import Dict, Optional, Callable, List
-from datetime import datetime
 from dataclasses import dataclass
+
+from strategies.avellaneda_stoikov.orderbook import (
+    OrderBookCollector,
+    OrderBookSnapshot,
+    TradeRecord,
+)
 
 
 @dataclass
@@ -196,6 +201,36 @@ class BybitClient:
         }
         return self._request("POST", "/v5/order/cancel", params, signed=True)
 
+    def place_maker_order(
+        self,
+        symbol: str,
+        side: str,
+        qty: str,
+        price: str,
+    ) -> Dict:
+        """Place a Post-Only limit order (maker only).
+
+        The order will be rejected by the exchange if it would
+        immediately match as a taker, ensuring we always pay maker fees.
+
+        Args:
+            symbol: Trading symbol
+            side: "Buy" or "Sell"
+            qty: Order quantity as string
+            price: Limit price as string
+
+        Returns:
+            Order result dict from Bybit API.
+        """
+        return self.place_order(
+            symbol=symbol,
+            side=side,
+            order_type="Limit",
+            qty=qty,
+            price=price,
+            time_in_force="PostOnly",
+        )
+
     def cancel_all_orders(self, symbol: str = "BTCUSDT") -> Dict:
         """Cancel all open orders."""
         params = {"category": "spot", "symbol": symbol}
@@ -231,12 +266,14 @@ class BybitWebSocket:
         on_orderbook: Optional[Callable] = None,
         on_trade: Optional[Callable] = None,
         on_kline: Optional[Callable] = None,
+        collector: Optional[OrderBookCollector] = None,
     ):
         self.config = config
         self.on_ticker = on_ticker
         self.on_orderbook = on_orderbook
         self.on_trade = on_trade
         self.on_kline = on_kline
+        self.collector = collector
 
         self.ws: Optional[websocket.WebSocketApp] = None
         self.running = False
@@ -266,11 +303,15 @@ class BybitWebSocket:
                 self.last_orderbook = data.get("data", {})
                 if self.on_orderbook:
                     self.on_orderbook(self.last_orderbook)
+                if self.collector:
+                    self._feed_orderbook_to_collector(self.last_orderbook)
 
             elif "publicTrade" in topic:
                 self.last_trade = data.get("data", [])
                 if self.on_trade:
                     self.on_trade(self.last_trade)
+                if self.collector:
+                    self._feed_trades_to_collector(self.last_trade)
 
             elif "kline" in topic:
                 if self.on_kline:
@@ -297,7 +338,7 @@ class BybitWebSocket:
             "op": "subscribe",
             "args": [
                 "tickers.BTCUSDT",
-                "orderbook.25.BTCUSDT",
+                "orderbook.50.BTCUSDT",
                 "publicTrade.BTCUSDT",
                 "kline.5.BTCUSDT",
             ]
@@ -332,6 +373,33 @@ class BybitWebSocket:
         if self.ws:
             self.ws.close()
         print("WebSocket stopped")
+
+    def _feed_orderbook_to_collector(self, raw: Dict) -> None:
+        """Parse raw Bybit orderbook data and add snapshot to collector."""
+        try:
+            bids = [(float(p), float(q)) for p, q in raw.get("b", [])]
+            asks = [(float(p), float(q)) for p, q in raw.get("a", [])]
+            ts = float(raw.get("ts", time.time() * 1000)) / 1000.0
+            self.collector.add_snapshot(OrderBookSnapshot(
+                bids=bids,
+                asks=asks,
+                timestamp=ts,
+            ))
+        except (ValueError, TypeError, KeyError):
+            pass
+
+    def _feed_trades_to_collector(self, raw_trades: List) -> None:
+        """Parse raw Bybit publicTrade data and add trades to collector."""
+        for trade in raw_trades:
+            try:
+                self.collector.add_trade(TradeRecord(
+                    price=float(trade.get("p", 0)),
+                    qty=float(trade.get("v", 0)),
+                    timestamp=float(trade.get("T", time.time() * 1000)) / 1000.0,
+                    side=trade.get("S", "Buy"),
+                ))
+            except (ValueError, TypeError, KeyError):
+                pass
 
     def get_mid_price(self) -> Optional[float]:
         """Get current mid price from ticker."""

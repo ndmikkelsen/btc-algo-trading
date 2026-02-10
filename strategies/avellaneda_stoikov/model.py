@@ -31,6 +31,7 @@ import pandas as pd
 from dataclasses import dataclass
 from typing import Tuple
 
+from strategies.avellaneda_stoikov.base_model import MarketMakingModel
 from strategies.avellaneda_stoikov.config import (
     RISK_AVERSION,
     VOLATILITY_WINDOW,
@@ -126,7 +127,7 @@ class VolatilityEstimator:
         return float(volatility)
 
 
-class AvellanedaStoikov:
+class AvellanedaStoikov(MarketMakingModel):
     """Avellaneda-Stoikov optimal market making model.
 
     Parameters γ and κ are in dollar-consistent units:

@@ -12,7 +12,7 @@ from pytest_bdd import scenarios, given, when, then, parsers
 from strategies.avellaneda_stoikov.model import AvellanedaStoikov
 
 # Load all scenarios from the .feature file
-scenarios(".")
+scenarios("trading/market-making.feature")
 
 
 # --- Shared context ---
