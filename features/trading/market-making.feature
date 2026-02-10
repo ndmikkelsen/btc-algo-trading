@@ -41,17 +41,17 @@ Feature: Avellaneda-Stoikov Market Making
     And I recalculate with a volatility of 0.02
     Then the second spread should be wider than the first
 
-  Scenario: Spread respects minimum bound
+  Scenario: Spread respects minimum dollar bound
     Given a volatility of 0.0001
     And a time remaining of 0.01
-    When I calculate the optimal spread at this volatility
-    Then the spread should be at least the minimum spread
+    When I calculate the quotes
+    Then the dollar spread should be at least the minimum dollar spread
 
-  Scenario: Spread respects maximum bound
+  Scenario: Spread respects maximum dollar bound
     Given a volatility of 1.0
     And a time remaining of 1.0
-    When I calculate the optimal spread at this volatility
-    Then the spread should be at most the maximum spread
+    When I calculate the quotes
+    Then the dollar spread should be at most the maximum dollar spread
 
   # --- Quote Calculation ---
 

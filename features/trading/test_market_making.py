@@ -77,7 +77,7 @@ def given_high_gamma_model(ctx):
     ctx.model = AvellanedaStoikov(
         risk_aversion=1.0,
         order_book_liquidity=10.0,
-        max_spread=0.5,
+        max_spread_dollar=1e12,
     )
 
 
@@ -103,24 +103,25 @@ def when_calculate_reservation_price(ctx):
 @when("I calculate the optimal spread at this volatility")
 def when_calculate_spread(ctx):
     ctx.spread = ctx.model.calculate_optimal_spread(
-        ctx.volatility, ctx.time_remaining,
+        ctx.volatility, ctx.time_remaining, mid_price=ctx.mid_price,
     )
 
 
 @when(parsers.parse("I recalculate with a volatility of {volatility:g}"))
 def when_recalculate_spread(ctx, volatility):
     ctx.spread_2 = ctx.model.calculate_optimal_spread(
-        volatility, ctx.time_remaining,
+        volatility, ctx.time_remaining, mid_price=ctx.mid_price,
     )
 
 
 @when("I calculate the quotes")
 def when_calculate_quotes(ctx):
+    inv = ctx.inventory if ctx.inventory is not None else 0
     ctx.bid, ctx.ask = ctx.model.calculate_quotes(
-        ctx.mid_price, ctx.inventory, ctx.volatility, ctx.time_remaining,
+        ctx.mid_price, inv, ctx.volatility, ctx.time_remaining,
     )
     ctx.reservation_price = ctx.model.calculate_reservation_price(
-        ctx.mid_price, ctx.inventory, ctx.volatility, ctx.time_remaining,
+        ctx.mid_price, inv, ctx.volatility, ctx.time_remaining,
     )
 
 
@@ -164,14 +165,16 @@ def then_second_spread_wider(ctx):
     assert ctx.spread_2 > ctx.spread
 
 
-@then("the spread should be at least the minimum spread")
-def then_spread_at_least_minimum(ctx):
-    assert ctx.spread >= ctx.model.min_spread
+@then("the dollar spread should be at least the minimum dollar spread")
+def then_spread_at_least_min_dollar(ctx):
+    dollar_spread = ctx.ask - ctx.bid
+    assert dollar_spread >= ctx.model.min_spread_dollar - 1e-9
 
 
-@then("the spread should be at most the maximum spread")
-def then_spread_at_most_maximum(ctx):
-    assert ctx.spread <= ctx.model.max_spread
+@then("the dollar spread should be at most the maximum dollar spread")
+def then_spread_at_most_max_dollar(ctx):
+    dollar_spread = ctx.ask - ctx.bid
+    assert dollar_spread <= ctx.model.max_spread_dollar + 1e-9
 
 
 @then("the bid should be below the ask")

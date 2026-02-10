@@ -85,10 +85,11 @@ SESSION_LENGTH = 86400  # 24 hours
 QUOTE_REFRESH_INTERVAL = 1.0  # Every candle
 
 # =============================================================================
-# Fees
+# Fees (Bybit Spot — Regular tier as of 2025)
 # =============================================================================
 
-MAKER_FEE = 0.001  # 0.1%
+MAKER_FEE = 0.0002  # 0.02%
+TAKER_FEE = 0.00055  # 0.055%
 
 # Fee efficiency threshold: only trade if expected profit > 2x fees
 MIN_PROFIT_MULTIPLIER = 2.0
@@ -99,7 +100,7 @@ MIN_PROFIT_MULTIPLIER = 2.0
 
 def is_trade_profitable(spread: float) -> bool:
     """Check if a trade at given spread would be profitable after fees."""
-    round_trip_fee = MAKER_FEE * 2  # 0.2%
+    round_trip_fee = MAKER_FEE * 2  # 0.04% (maker on both sides)
     min_profitable_spread = round_trip_fee * MIN_PROFIT_MULTIPLIER
     return spread >= min_profitable_spread
 

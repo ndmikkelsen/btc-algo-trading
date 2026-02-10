@@ -4,7 +4,11 @@ Implementation of the optimal market making framework from:
 "High-frequency trading in a limit order book" (Avellaneda & Stoikov, 2008)
 """
 
-from strategies.avellaneda_stoikov.model import AvellanedaStoikov
+from strategies.avellaneda_stoikov.model import (
+    AvellanedaStoikov,
+    VolatilityEstimator,
+    VolatilityEstimate,
+)
 from strategies.avellaneda_stoikov.order_manager import (
     Order,
     OrderSide,
@@ -18,6 +22,8 @@ from strategies.avellaneda_stoikov.risk_manager import RiskManager, TradeSetup
 
 __all__ = [
     "AvellanedaStoikov",
+    "VolatilityEstimator",
+    "VolatilityEstimate",
     "Order",
     "OrderSide",
     "OrderStatus",

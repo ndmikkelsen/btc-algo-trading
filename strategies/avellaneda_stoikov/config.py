@@ -38,6 +38,14 @@ VOLATILITY_METHOD = 'standard'
 ORDER_BOOK_LIQUIDITY = 1.5
 
 # =============================================================================
+# Tick Size (Bybit BTCUSDT)
+# =============================================================================
+
+# Minimum price increment for the instrument
+# All model calculations use tick-normalized units internally
+TICK_SIZE = 0.10  # Bybit BTCUSDT tick size in dollars
+
+# =============================================================================
 # Time Parameters
 # =============================================================================
 
@@ -47,16 +55,20 @@ ORDER_BOOK_LIQUIDITY = 1.5
 SESSION_LENGTH = 86400
 
 # =============================================================================
-# Quote Parameters
+# Quote Parameters (dollar-based)
 # =============================================================================
 
-# Minimum spread (as decimal, e.g., 0.001 = 0.1%)
-# Floor to prevent quotes that are too tight
-MIN_SPREAD = 0.0005
+# Minimum spread in dollars
+# Floor to prevent quotes that are too tight (must exceed round-trip fees)
+MIN_SPREAD_DOLLAR = 5.0  # $5 minimum spread (~5 bps at $100k BTC)
 
-# Maximum spread (as decimal, e.g., 0.05 = 5%)
+# Maximum spread in dollars
 # Ceiling to prevent quotes that are too wide
-MAX_SPREAD = 0.05
+MAX_SPREAD_DOLLAR = 500.0  # $500 maximum spread (~50 bps at $100k BTC)
+
+# Legacy percentage-based spreads (used by tests expecting pct interface)
+MIN_SPREAD = 0.0005  # 0.05% — will be overridden by dollar-based in model
+MAX_SPREAD = 0.05    # 5% — will be overridden by dollar-based in model
 
 # Order size (in base currency units)
 ORDER_SIZE = 0.001  # 0.001 BTC
@@ -72,14 +84,14 @@ QUOTE_REFRESH_INTERVAL = 1.0
 PRICE_TOLERANCE = 0.002
 
 # =============================================================================
-# Fee Parameters (Bybit Spot)
+# Fee Parameters (Bybit Spot — Regular tier as of 2025)
 # =============================================================================
 
 # Maker fee (limit orders that add liquidity)
-MAKER_FEE = 0.001  # 0.1%
+MAKER_FEE = 0.0002  # 0.02%
 
 # Taker fee (market orders that remove liquidity)
-TAKER_FEE = 0.001  # 0.1%
+TAKER_FEE = 0.00055  # 0.055%
 
 # =============================================================================
 # Regime Detection Parameters
