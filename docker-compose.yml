@@ -1,7 +1,7 @@
-# A-S / GLFT Market Making Trader
+# A-S / GLFT Market Making Trader (MEXC)
 #
 # Usage:
-#   docker compose up -d          # Start trader (testnet)
+#   docker compose up -d          # Start trader (dry-run)
 #   docker compose logs -f        # Follow logs
 #   docker compose down           # Stop trader
 #
@@ -16,9 +16,9 @@ services:
     env_file:
       - .env
     environment:
-      - BYBIT_API_KEY=${BYBIT_API_KEY}
-      - BYBIT_API_SECRET=${BYBIT_API_SECRET}
-      - BYBIT_TESTNET=${BYBIT_TESTNET:-true}
+      - MEXC_API_KEY=${MEXC_API_KEY}
+      - MEXC_API_SECRET=${MEXC_API_SECRET}
+      - DRY_RUN=${DRY_RUN:-true}
       - TRADING_MODEL=${TRADING_MODEL:-glft}
       - FEE_TIER=${FEE_TIER:-regular}
       - KAPPA_MODE=${KAPPA_MODE:-live}

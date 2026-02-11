@@ -62,11 +62,11 @@ SESSION_LENGTH = 14400  # 4 hours in seconds
 QUOTE_REFRESH_INTERVAL = 1.0  # Every candle
 
 # =============================================================================
-# Fees (Bybit Spot — Regular tier as of 2025)
+# Fees (MEXC Spot — Regular tier)
 # =============================================================================
 
-MAKER_FEE = 0.0002  # 0.02%
-TAKER_FEE = 0.00055  # 0.055%
+MAKER_FEE = 0.0  # 0%
+TAKER_FEE = 0.0005  # 0.05%
 
 # =============================================================================
 # Regime Detection

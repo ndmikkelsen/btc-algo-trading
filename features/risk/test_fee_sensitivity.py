@@ -36,9 +36,7 @@ def fctx():
 
 TIER_MAP = {
     "Regular": FeeTier.REGULAR,
-    "VIP1": FeeTier.VIP1,
-    "VIP2": FeeTier.VIP2,
-    "Market Maker": FeeTier.MARKET_MAKER,
+    "MX Deduction": FeeTier.MX_DEDUCTION,
 }
 
 
@@ -73,12 +71,12 @@ def when_generate_report(fctx, bbo):
 @then(parsers.parse("the minimum spread should be {pct:g} percent"))
 def then_min_spread_pct(fctx, pct):
     expected = pct / 100.0  # convert "0.04 percent" -> 0.0004
-    assert fctx.min_spread_pct == pytest.approx(expected, rel=1e-6)
+    assert fctx.min_spread_pct == pytest.approx(expected, abs=1e-10)
 
 
 @then(parsers.parse("the minimum spread in dollars should be {dollars:g}"))
 def then_min_spread_dollar(fctx, dollars):
-    assert fctx.min_spread_dollar == pytest.approx(dollars, rel=1e-6)
+    assert fctx.min_spread_dollar == pytest.approx(dollars, abs=1e-10)
 
 
 @then("the strategy should be viable at typical BBO")

@@ -43,9 +43,8 @@ VOLATILITY_WINDOW = 20
 # OPTIMIZED Spread Parameters
 # =============================================================================
 
-# Minimum spread - must be > 0.2% (round-trip fee)
-# Optimal found: 0.3% - 0.8% all performed similarly
-MIN_SPREAD = 0.004  # 0.4% - provides buffer above fee
+# Minimum spread - with 0% maker fees, any positive spread is profitable
+MIN_SPREAD = 0.001  # 0.1% - minimum viable spread
 
 # Maximum spread
 MAX_SPREAD = 0.03  # 3%
@@ -85,11 +84,11 @@ SESSION_LENGTH = 86400  # 24 hours
 QUOTE_REFRESH_INTERVAL = 1.0  # Every candle
 
 # =============================================================================
-# Fees (Bybit Spot — Regular tier as of 2025)
+# Fees (MEXC Spot — Regular tier)
 # =============================================================================
 
-MAKER_FEE = 0.0002  # 0.02%
-TAKER_FEE = 0.00055  # 0.055%
+MAKER_FEE = 0.0  # 0%
+TAKER_FEE = 0.0005  # 0.05%
 
 # Fee efficiency threshold: only trade if expected profit > 2x fees
 MIN_PROFIT_MULTIPLIER = 2.0

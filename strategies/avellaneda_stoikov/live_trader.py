@@ -1,10 +1,13 @@
 """Live/Paper trader for market making strategies.
 
-Connects to Bybit (testnet or mainnet) and executes a market making model
-(GLFT or A-S) in real-time with live kappa calibration and fee tracking.
+Connects to MEXC and executes a market making model (GLFT or A-S) in
+real-time with live kappa calibration and fee tracking.
+
+Supports two modes:
+- dry_run=True (default): real market data, simulated fills locally
+- dry_run=False: real order placement via MEXC REST API
 """
 
-import time
 import threading
 from datetime import datetime
 from typing import Optional, Dict, List, Set
@@ -23,10 +26,11 @@ from strategies.avellaneda_stoikov.kappa_provider import (
     KappaProvider,
     LiveKappaProvider,
 )
-from strategies.avellaneda_stoikov.bybit_client import (
-    BybitClient,
-    BybitWebSocket,
-    BybitConfig,
+from strategies.avellaneda_stoikov.mexc_client import (
+    MexcClient,
+    DryRunClient,
+    MexcConfig,
+    MexcMarketPoller,
 )
 from strategies.avellaneda_stoikov.config_optimized import (
     INITIAL_CAPITAL,
@@ -60,11 +64,11 @@ class LiveTrader:
     """
     Live trader using a MarketMakingModel (GLFT or A-S).
 
-    Connects to Bybit and:
-    - Receives real-time price + order book data
+    Connects to MEXC and:
+    - Polls real-time price + order book data via REST
     - Calibrates kappa from live trade flow via KappaProvider
     - Calculates optimal quotes using the model
-    - Places/updates Post-Only limit orders
+    - Places/updates LIMIT_MAKER orders (0% maker fee)
     - Tracks fees via FeeModel and manages inventory
     """
 
@@ -72,7 +76,7 @@ class LiveTrader:
         self,
         api_key: str,
         api_secret: str,
-        testnet: bool = True,
+        dry_run: bool = True,
         symbol: str = "BTCUSDT",
         initial_capital: float = INITIAL_CAPITAL,
         order_size: float = ORDER_SIZE,
@@ -82,36 +86,26 @@ class LiveTrader:
         fee_model: Optional[FeeModel] = None,
         kappa_provider: Optional[KappaProvider] = None,
     ):
-        """
-        Initialize live trader.
-
-        Args:
-            api_key: Bybit API key
-            api_secret: Bybit API secret
-            testnet: Use testnet (True) or mainnet (False)
-            symbol: Trading symbol
-            initial_capital: Starting capital for tracking
-            order_size: Order size in BTC
-            use_regime_filter: Enable regime detection
-            quote_interval: Seconds between quote updates
-            model: MarketMakingModel instance (default: GLFTModel)
-            fee_model: FeeModel instance (default: REGULAR tier)
-            kappa_provider: KappaProvider instance (default: LiveKappaProvider)
-        """
         self.symbol = symbol
         self.initial_capital = initial_capital
         self.order_size = order_size
         self.use_regime_filter = use_regime_filter
         self.quote_interval = quote_interval
+        self.dry_run = dry_run
 
-        # Bybit client
-        self.config = BybitConfig(
+        # MEXC client
+        self.config = MexcConfig(
             api_key=api_key,
             api_secret=api_secret,
-            testnet=testnet,
         )
-        self.client = BybitClient(self.config)
-        self.ws: Optional[BybitWebSocket] = None
+        if dry_run:
+            self.client = DryRunClient(
+                self.config,
+                initial_usdt=initial_capital,
+                initial_btc=0.0,
+            )
+        else:
+            self.client = MexcClient(self.config)
 
         # Model (default: GLFT infinite-horizon)
         self.model: MarketMakingModel = model or GLFTModel()
@@ -119,8 +113,15 @@ class LiveTrader:
         # Fee model
         self.fee_model = fee_model or FeeModel(FeeTier.REGULAR)
 
-        # Order book collector for kappa calibration and WebSocket feed
+        # Order book collector for kappa calibration
         self.collector = OrderBookCollector()
+
+        # Market data poller (replaces WebSocket)
+        self.poller = MexcMarketPoller(
+            client=self.client,
+            collector=self.collector,
+            symbol=symbol,
+        )
 
         # Kappa provider (default: live calibration from collector)
         self.kappa_provider: KappaProvider = kappa_provider or LiveKappaProvider(
@@ -160,15 +161,17 @@ class LiveTrader:
         self._stop_event = threading.Event()
         self._quote_thread: Optional[threading.Thread] = None
 
-    def _on_ticker(self, ticker: Dict):
-        """Handle ticker update."""
+    def _poll_market_data(self):
+        """Poll market data and update state from ticker."""
+        ticker = self.poller.poll()
+        if ticker is None:
+            return
+
         try:
             price = float(ticker.get("lastPrice", 0))
             if price > 0:
                 self.state.current_price = price
                 self.price_history.append(price)
-
-                # Keep last 100 prices for volatility
                 if len(self.price_history) > 100:
                     self.price_history = self.price_history[-100:]
 
@@ -181,28 +184,6 @@ class LiveTrader:
 
         except Exception as e:
             self.state.errors.append(f"Ticker error: {e}")
-
-    def _on_kline(self, klines: List):
-        """Handle kline update for regime detection."""
-        try:
-            if not klines:
-                return
-
-            for kline in klines:
-                high = float(kline.get("high", 0))
-                low = float(kline.get("low", 0))
-
-                if high > 0:
-                    self.high_history.append(high)
-                    self.low_history.append(low)
-
-                    # Keep last 50 for ADX
-                    if len(self.high_history) > 50:
-                        self.high_history = self.high_history[-50:]
-                        self.low_history = self.low_history[-50:]
-
-        except Exception as e:
-            self.state.errors.append(f"Kline error: {e}")
 
     def _detect_regime(self) -> Optional[MarketRegime]:
         """Detect current market regime."""
@@ -281,7 +262,6 @@ class LiveTrader:
         try:
             # Check if we should trade
             if not self._should_trade():
-                # Cancel existing orders in trending market
                 if self.state.bid_order_id or self.state.ask_order_id:
                     self._cancel_all_orders()
                     print(f"[{datetime.now()}] Trending market - orders cancelled")
@@ -315,25 +295,21 @@ class LiveTrader:
             # Cancel existing orders
             self._cancel_all_orders()
 
-            # Place new Post-Only limit orders
-            bid_result = self.client.place_order(
+            # Place new LIMIT_MAKER orders
+            bid_result = self.client.place_maker_order(
                 symbol=self.symbol,
                 side="Buy",
-                order_type="Limit",
                 qty=str(self.order_size),
                 price=str(round(bid, 2)),
-                time_in_force="PostOnly",
             )
             self.state.bid_order_id = bid_result.get("orderId")
             self.state.bid_price = bid
 
-            ask_result = self.client.place_order(
+            ask_result = self.client.place_maker_order(
                 symbol=self.symbol,
                 side="Sell",
-                order_type="Limit",
                 qty=str(self.order_size),
                 price=str(round(ask, 2)),
-                time_in_force="PostOnly",
             )
             self.state.ask_order_id = ask_result.get("orderId")
             self.state.ask_price = ask
@@ -360,39 +336,64 @@ class LiveTrader:
     def _check_fills(self):
         """Check for order fills and update state."""
         try:
-            # Get recent order history
-            orders = self.client.get_order_history(self.symbol, limit=10)
+            if self.dry_run:
+                # In dry-run mode, use simulated fill checking
+                fills = self.client.check_fills(self.state.current_price)
+                for fill in fills:
+                    order_id = fill.get("orderId")
+                    if order_id and order_id not in self._processed_fills:
+                        self._processed_fills.add(order_id)
+                        side = fill.get("side")
+                        qty = float(fill.get("qty", 0))
+                        price = float(fill.get("avgPrice", 0))
+                        notional = qty * price
 
-            for order in orders:
-                order_id = order.get("orderId")
-                if (
-                    order.get("orderStatus") == "Filled"
-                    and order_id
-                    and order_id not in self._processed_fills
-                ):
-                    self._processed_fills.add(order_id)
-                    side = order.get("side")
-                    qty = float(order.get("qty", 0))
-                    price = float(order.get("avgPrice", 0))
-                    notional = qty * price
+                        fee = self.fee_model.maker_fee(notional)
+                        self.state.total_fees += fee
 
-                    # Calculate maker fee (Post-Only ensures maker fills)
-                    fee = self.fee_model.maker_fee(notional)
-                    self.state.total_fees += fee
+                        if side in ("Buy", "buy"):
+                            self.state.inventory += qty
+                            self.state.cash -= notional + fee
+                        else:
+                            self.state.inventory -= qty
+                            self.state.cash += notional - fee
 
-                    # Update local tracking
-                    if side == "Buy":
-                        self.state.inventory += qty
-                        self.state.cash -= notional + fee
-                    else:
-                        self.state.inventory -= qty
-                        self.state.cash += notional - fee
+                        self.state.trades_count += 1
+                        print(
+                            f"[{datetime.now()}] FILL: {side} {qty} "
+                            f"@ ${price:.2f} (fee: ${fee:.4f})"
+                        )
+            else:
+                # In live mode, check order history
+                orders = self.client.get_order_history(self.symbol, limit=10)
+                for order in orders:
+                    order_id = order.get("orderId")
+                    if (
+                        order.get("orderStatus") == "Filled"
+                        and order_id
+                        and order_id not in self._processed_fills
+                    ):
+                        self._processed_fills.add(order_id)
+                        side = order.get("side")
+                        qty = float(order.get("qty", 0))
+                        price = float(order.get("avgPrice", 0))
+                        notional = qty * price
 
-                    self.state.trades_count += 1
-                    print(
-                        f"[{datetime.now()}] FILL: {side} {qty} "
-                        f"@ ${price:.2f} (fee: ${fee:.4f})"
-                    )
+                        fee = self.fee_model.maker_fee(notional)
+                        self.state.total_fees += fee
+
+                        if side in ("Buy", "buy"):
+                            self.state.inventory += qty
+                            self.state.cash -= notional + fee
+                        else:
+                            self.state.inventory -= qty
+                            self.state.cash += notional - fee
+
+                        self.state.trades_count += 1
+                        print(
+                            f"[{datetime.now()}] FILL: {side} {qty} "
+                            f"@ ${price:.2f} (fee: ${fee:.4f})"
+                        )
 
         except Exception as e:
             self.state.errors.append(f"Fill check error: {e}")
@@ -401,6 +402,9 @@ class LiveTrader:
         """Main loop for updating quotes."""
         while not self._stop_event.is_set():
             try:
+                # Poll market data (replaces WebSocket)
+                self._poll_market_data()
+
                 self._update_quotes()
                 self._check_fills()
 
@@ -425,12 +429,13 @@ class LiveTrader:
         model_name = type(self.model).__name__
         fee_tier = self.fee_model.tier.value
         kappa_mode = type(self.kappa_provider).__name__
+        mode = "DRY-RUN" if self.dry_run else "LIVE"
 
         print("=" * 60)
         print("MARKET MAKING PAPER TRADER")
         print("=" * 60)
         print(f"Model:          {model_name}")
-        print(f"Mode:           {'TESTNET' if self.config.testnet else 'MAINNET'}")
+        print(f"Exchange:       MEXC ({mode})")
         print(f"Symbol:         {self.symbol}")
         print(f"Initial Capital: ${self.initial_capital:,.2f}")
         print(f"Order Size:     {self.order_size} BTC")
@@ -440,20 +445,7 @@ class LiveTrader:
         print(f"Quote Interval: {self.quote_interval}s")
         print("=" * 60)
 
-        # Start WebSocket with OrderBookCollector for kappa calibration
-        self.ws = BybitWebSocket(
-            self.config,
-            on_ticker=self._on_ticker,
-            on_kline=self._on_kline,
-            collector=self.collector,
-        )
-        self.ws.start()
-
-        # Wait for initial data
-        print("Waiting for market data...")
-        time.sleep(3)
-
-        # Start quote loop
+        # Start quote loop (polls market data inline)
         self._stop_event.clear()
         self._quote_thread = threading.Thread(target=self._quote_loop)
         self._quote_thread.daemon = True
@@ -471,10 +463,6 @@ class LiveTrader:
         # Cancel all orders
         self._cancel_all_orders()
 
-        # Stop WebSocket
-        if self.ws:
-            self.ws.stop()
-
         self.state.is_running = False
 
         # Print summary
@@ -487,6 +475,7 @@ class LiveTrader:
         print("SESSION SUMMARY")
         print("=" * 60)
         print(f"Model:           {type(self.model).__name__}")
+        print(f"Mode:            {'DRY-RUN' if self.dry_run else 'LIVE'}")
         print(f"Final Price:     ${self.state.current_price:,.2f}")
         print(f"Final Inventory: {self.state.inventory:.6f} BTC")
         print(f"Final Cash:      ${self.state.cash:,.2f}")
@@ -501,6 +490,7 @@ class LiveTrader:
         return {
             "is_running": self.state.is_running,
             "model": type(self.model).__name__,
+            "mode": "dry-run" if self.dry_run else "live",
             "current_price": self.state.current_price,
             "current_spread": self.state.current_spread,
             "current_regime": self.state.current_regime,

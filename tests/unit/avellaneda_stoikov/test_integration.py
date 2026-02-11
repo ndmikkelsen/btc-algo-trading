@@ -1,11 +1,11 @@
-"""Integration tests for Phase 6: wiring all components together.
+"""Integration tests for wiring all components together.
 
 Verifies that LiveTrader correctly wires:
 - MarketMakingModel (GLFT / A-S)
 - KappaProvider (Live / Constant)
 - FeeModel (fee tracking, profitability checks)
-- OrderBookCollector (WebSocket data pipeline)
-- Post-Only order placement
+- OrderBookCollector (market data pipeline)
+- LIMIT_MAKER order placement
 """
 
 from unittest.mock import MagicMock
@@ -24,7 +24,11 @@ from strategies.avellaneda_stoikov.kappa_provider import (
     LiveKappaProvider,
 )
 from strategies.avellaneda_stoikov.live_trader import LiveTrader, TraderState
-from strategies.avellaneda_stoikov.bybit_client import BybitClient, BybitConfig
+from strategies.avellaneda_stoikov.mexc_client import (
+    MexcClient,
+    DryRunClient,
+    MexcConfig,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -32,16 +36,18 @@ from strategies.avellaneda_stoikov.bybit_client import BybitClient, BybitConfig
 # ---------------------------------------------------------------------------
 
 def _make_trader(**kwargs):
-    """Create a LiveTrader with mocked Bybit client."""
+    """Create a LiveTrader with mocked MEXC client."""
     defaults = dict(
         api_key="test-key",
         api_secret="test-secret",
-        testnet=True,
+        dry_run=True,
     )
     defaults.update(kwargs)
     trader = LiveTrader(**defaults)
     # Mock the client to avoid real HTTP calls
-    trader.client = MagicMock(spec=BybitClient)
+    trader.client = MagicMock(spec=DryRunClient)
+    trader.client.cancel_all_orders.return_value = {'cancelled': [], 'count': 0}
+    trader.client.check_fills.return_value = []
     return trader
 
 
@@ -77,13 +83,13 @@ class TestLiveTraderFeeWiring:
         assert isinstance(trader.fee_model, FeeModel)
         assert trader.fee_model.tier == FeeTier.REGULAR
 
-    def test_inject_vip_fee_model(self):
-        fm = FeeModel(FeeTier.VIP1)
+    def test_inject_mx_deduction_fee_model(self):
+        fm = FeeModel(FeeTier.MX_DEDUCTION)
         trader = _make_trader(fee_model=fm)
-        assert trader.fee_model.tier == FeeTier.VIP1
+        assert trader.fee_model.tier == FeeTier.MX_DEDUCTION
 
     def test_order_manager_uses_fee_model_rate(self):
-        fm = FeeModel(FeeTier.VIP1)
+        fm = FeeModel(FeeTier.REGULAR)
         trader = _make_trader(fee_model=fm)
         assert trader.order_manager.maker_fee == fm.schedule.maker
 
@@ -123,6 +129,24 @@ class TestKappaModelUpdate:
         assert trader.model.order_book_liquidity == 0.03
         # A-S model has no arrival_rate attribute
         assert not hasattr(AvellanedaStoikov, "arrival_rate")
+
+
+class TestDryRunMode:
+    """Test dry-run vs live mode selection."""
+
+    def test_default_is_dry_run(self):
+        trader = LiveTrader(
+            api_key="test", api_secret="test",
+        )
+        assert trader.dry_run is True
+        assert isinstance(trader.client, DryRunClient)
+
+    def test_live_mode_creates_mexc_client(self):
+        trader = LiveTrader(
+            api_key="test", api_secret="test", dry_run=False,
+        )
+        assert trader.dry_run is False
+        assert isinstance(trader.client, MexcClient)
 
 
 # ===========================================================================
@@ -210,101 +234,71 @@ class TestPipelineWiring:
 class TestFeeTracking:
     """Test fee model integration in trading loop."""
 
-    def test_maker_fee_at_regular_tier(self):
+    def test_maker_fee_is_zero(self):
         fm = FeeModel(FeeTier.REGULAR)
         fee = fm.maker_fee(100_000.0)
-        assert abs(fee - 20.0) < 0.01
+        assert fee == 0.0
 
-    def test_round_trip_cost(self):
+    def test_round_trip_cost_is_zero(self):
         fm = FeeModel(FeeTier.REGULAR)
         rt = fm.round_trip_cost(100_000.0, maker_both=True)
-        assert abs(rt - 40.0) < 0.01
+        assert rt == 0.0
 
-    def test_spread_profitable(self):
-        """Spread wide enough to exceed round-trip fees."""
+    def test_spread_always_profitable(self):
+        """With 0% maker fees, any positive spread is profitable."""
         trader = _make_trader()
         trader.state.current_price = 100_000.0
         trader.order_size = 0.001
-        # Spread $50 on 0.001 BTC → profit $0.05
-        # RT fee: 0.001 × 100k × 0.0002 × 2 = $0.04
-        assert trader._is_spread_profitable(99975.0, 100025.0)
+        # Even a $10 spread is profitable with 0% maker fees
+        assert trader._is_spread_profitable(99995.0, 100005.0)
 
-    def test_spread_not_profitable(self):
-        """Spread too tight to cover fees."""
+    def test_spread_profitable_tight(self):
+        """Even very tight spread is profitable with 0% maker."""
         trader = _make_trader()
         trader.state.current_price = 100_000.0
         trader.order_size = 0.001
-        # Spread $10 on 0.001 BTC → profit $0.01, fee $0.04
-        assert not trader._is_spread_profitable(99995.0, 100005.0)
+        # $0.20 spread: profit = $0.20 * 0.001 = $0.0002, fee = $0
+        assert trader._is_spread_profitable(99999.9, 100000.1)
 
 
 # ===========================================================================
-# Post-Only Orders
+# LIMIT_MAKER Orders
 # ===========================================================================
 
 
-class TestPostOnlyOrders:
-    """Test Post-Only order placement through BybitClient."""
+class TestLimitMakerOrders:
+    """Test LIMIT_MAKER order placement."""
 
-    def test_place_order_with_post_only_tif(self):
-        config = BybitConfig(api_key="test", api_secret="test", testnet=True)
-        client = BybitClient(config)
-        client._request = MagicMock(return_value={"orderId": "12345"})
-
-        client.place_order(
-            symbol="BTCUSDT",
-            side="Buy",
-            order_type="Limit",
-            qty="0.001",
-            price="100000.00",
-            time_in_force="PostOnly",
-        )
-
-        params = client._request.call_args[0][2]
-        assert params["timeInForce"] == "PostOnly"
-
-    def test_place_maker_order_convenience(self):
-        config = BybitConfig(api_key="test", api_secret="test", testnet=True)
-        client = BybitClient(config)
-        client._request = MagicMock(return_value={"orderId": "67890"})
+    def test_place_maker_order_uses_limit_maker(self):
+        config = MexcConfig(api_key="test", api_secret="test")
+        client = MexcClient(config)
+        client.exchange = MagicMock()
+        client.exchange.create_order.return_value = {
+            'id': '12345', 'status': 'open',
+        }
 
         result = client.place_maker_order(
-            symbol="BTCUSDT",
-            side="Sell",
-            qty="0.001",
-            price="100100.00",
+            symbol="BTCUSDT", side="Buy", qty="0.001", price="100000.00",
         )
 
-        params = client._request.call_args[0][2]
-        assert params["timeInForce"] == "PostOnly"
-        assert params["orderType"] == "Limit"
-        assert result["orderId"] == "67890"
+        client.exchange.create_order.assert_called_with(
+            symbol="BTC/USDT", type="LIMIT_MAKER", side="buy",
+            amount=0.001, price=100000.0,
+        )
+        assert result['orderType'] == 'LIMIT_MAKER'
 
-    def test_live_trader_uses_post_only(self):
-        """LiveTrader places orders with PostOnly time-in-force."""
+    def test_live_trader_uses_limit_maker(self):
+        """LiveTrader places LIMIT_MAKER orders via place_maker_order."""
         trader = _make_trader()
         trader.state.current_price = 100_000.0
-        trader.client.place_order.return_value = {"orderId": "bid-1"}
+        trader.client.place_maker_order.return_value = {"orderId": "bid-1"}
 
-        # Simulate a quote update cycle
-        trader.state.bid_price = None
-        trader.state.ask_price = None
-
-        # Manually invoke the order path
-        trader.client.cancel_all_orders.return_value = {}
-        trader._cancel_all_orders()
-
-        trader.client.place_order(
-            symbol="BTCUSDT",
-            side="Buy",
-            order_type="Limit",
-            qty="0.001",
-            price="99990.00",
-            time_in_force="PostOnly",
+        trader.client.place_maker_order(
+            symbol="BTCUSDT", side="Buy", qty="0.001", price="99990.00",
         )
 
-        call_kwargs = trader.client.place_order.call_args[1]
-        assert call_kwargs["time_in_force"] == "PostOnly"
+        call_kwargs = trader.client.place_maker_order.call_args[1]
+        assert call_kwargs["side"] == "Buy"
 
 
 # ===========================================================================
@@ -319,6 +313,11 @@ class TestTraderStatus:
         trader = _make_trader()
         status = trader.get_status()
         assert status["model"] == "GLFTModel"
+
+    def test_get_status_includes_mode(self):
+        trader = _make_trader()
+        status = trader.get_status()
+        assert status["mode"] == "dry-run"
 
     def test_get_status_includes_fees(self):
         trader = _make_trader()

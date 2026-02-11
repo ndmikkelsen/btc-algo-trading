@@ -30,9 +30,9 @@ docker build -t "$IMAGE_NAME" "$PROJECT_DIR"
 
 info "Verifying container starts..."
 docker run --rm -d --name algo-trader-test \
-    -e BYBIT_TESTNET=true \
-    -e BYBIT_API_KEY=test \
-    -e BYBIT_API_SECRET=test \
+    -e DRY_RUN=true \
+    -e MEXC_API_KEY=test \
+    -e MEXC_API_SECRET=test \
     "$IMAGE_NAME" 2>/dev/null && {
     sleep 2
     if docker ps --filter name=algo-trader-test --format '{{.Status}}' | grep -q "Up"; then

@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
-"""Run market making paper trader on Bybit testnet.
+"""Run market making paper trader on MEXC.
 
 Usage:
-    python scripts/run_paper_trader.py                        # GLFT with live kappa
+    python scripts/run_paper_trader.py                        # GLFT dry-run
     python scripts/run_paper_trader.py --model=as             # A-S model
-    python scripts/run_paper_trader.py --fee-tier=vip1        # VIP1 fees
+    python scripts/run_paper_trader.py --fee-tier=mx_deduction # MX token discount
     python scripts/run_paper_trader.py --kappa=constant       # Fixed kappa
+    python scripts/run_paper_trader.py --live                 # Live trading (real orders!)
 
 Environment variables:
-    BYBIT_API_KEY - Your Bybit testnet API key
-    BYBIT_API_SECRET - Your Bybit testnet API secret
+    MEXC_API_KEY - Your MEXC API key
+    MEXC_API_SECRET - Your MEXC API secret
 
-To get testnet API keys:
-    1. Go to https://testnet.bybit.com
-    2. Create an account (separate from mainnet)
-    3. Go to API Management
-    4. Create a new API key with trading permissions
-    5. Set environment variables or create a .env file
+To get API keys:
+    1. Go to https://www.mexc.com
+    2. Go to API Management
+    3. Create a new API key with spot trading permissions
+    4. Set environment variables or create a .env file
 """
 
 import argparse
@@ -38,15 +38,13 @@ from strategies.avellaneda_stoikov.live_trader import LiveTrader
 
 FEE_TIER_MAP = {
     "regular": FeeTier.REGULAR,
-    "vip1": FeeTier.VIP1,
-    "vip2": FeeTier.VIP2,
-    "market_maker": FeeTier.MARKET_MAKER,
+    "mx_deduction": FeeTier.MX_DEDUCTION,
 }
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Run market making paper trader on Bybit testnet.",
+        description="Run market making paper trader on MEXC.",
     )
     parser.add_argument(
         "--model",
@@ -58,7 +56,7 @@ def parse_args():
         "--fee-tier",
         choices=list(FEE_TIER_MAP.keys()),
         default="regular",
-        help="Bybit fee tier (default: regular)",
+        help="MEXC fee tier (default: regular)",
     )
     parser.add_argument(
         "--kappa",
@@ -89,6 +87,11 @@ def parse_args():
         action="store_true",
         help="Disable regime detection filter",
     )
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="Enable live trading (real orders). Default is dry-run.",
+    )
     return parser.parse_args()
 
 
@@ -104,8 +107,8 @@ def main():
     load_dotenv()
     args = parse_args()
 
-    api_key = os.getenv("BYBIT_API_KEY")
-    api_secret = os.getenv("BYBIT_API_SECRET")
+    api_key = os.getenv("MEXC_API_KEY")
+    api_secret = os.getenv("MEXC_API_SECRET")
 
     if not api_key or not api_secret:
         print("=" * 60)
@@ -113,21 +116,21 @@ def main():
         print("=" * 60)
         print()
         print("Please set environment variables:")
-        print("  export BYBIT_API_KEY='your-testnet-api-key'")
-        print("  export BYBIT_API_SECRET='your-testnet-api-secret'")
+        print("  export MEXC_API_KEY='your-api-key'")
+        print("  export MEXC_API_SECRET='your-api-secret'")
         print()
         print("Or create a .env file in the project root:")
-        print("  BYBIT_API_KEY=your-testnet-api-key")
-        print("  BYBIT_API_SECRET=your-testnet-api-secret")
+        print("  MEXC_API_KEY=your-api-key")
+        print("  MEXC_API_SECRET=your-api-secret")
         print()
-        print("To get testnet API keys:")
-        print("  1. Go to https://testnet.bybit.com")
-        print("  2. Create an account (separate from mainnet)")
-        print("  3. Go to API Management")
-        print("  4. Create a new API key with trading permissions")
+        print("To get API keys:")
+        print("  1. Go to https://www.mexc.com")
+        print("  2. Go to API Management")
+        print("  3. Create a new API key with spot trading permissions")
         print("=" * 60)
         sys.exit(1)
 
+    dry_run = not args.live
     model = build_model(args.model)
     fee_model = FeeModel(FEE_TIER_MAP[args.fee_tier])
 
@@ -139,7 +142,7 @@ def main():
     trader = LiveTrader(
         api_key=api_key,
         api_secret=api_secret,
-        testnet=True,  # Always use testnet for paper trading
+        dry_run=dry_run,
         symbol="BTCUSDT",
         initial_capital=args.capital,
         order_size=args.order_size,

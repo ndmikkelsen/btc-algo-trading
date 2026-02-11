@@ -43,6 +43,12 @@ from strategies.avellaneda_stoikov.tick_data import (
     TradeReplayProvider,
 )
 from strategies.avellaneda_stoikov.tick_simulator import TickSimulator
+from strategies.avellaneda_stoikov.mexc_client import (
+    MexcConfig,
+    MexcClient,
+    DryRunClient,
+    MexcMarketPoller,
+)
 
 __all__ = [
     "MarketMakingModel",
@@ -77,4 +83,8 @@ __all__ = [
     "OHLCVToTickConverter",
     "TradeReplayProvider",
     "TickSimulator",
+    "MexcConfig",
+    "MexcClient",
+    "DryRunClient",
+    "MexcMarketPoller",
 ]

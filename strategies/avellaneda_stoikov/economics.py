@@ -1,7 +1,7 @@
 """Trading economics and break-even analysis.
 
 Calculates profitability thresholds, expected P&L, and daily projections
-for the Avellaneda-Stoikov market making strategy on Bybit.
+for the Avellaneda-Stoikov market making strategy on MEXC.
 """
 
 from dataclasses import dataclass
@@ -144,7 +144,7 @@ class BreakEvenCalculator:
         Parameters
         ----------
         typical_bbo_dollar : float
-            Typical best bid-offer spread on Bybit BTCUSDT.
+            Typical best bid-offer spread on BTCUSDT.
 
         Returns
         -------

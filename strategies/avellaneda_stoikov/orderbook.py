@@ -1,6 +1,6 @@
 """Order book data pipeline for kappa calibration.
 
-Collects L2 order book snapshots and public trade data from Bybit,
+Collects L2 order book snapshots and public trade data,
 then calibrates the exponential fill rate model:
 
     lambda(delta) = A * exp(-kappa * delta)

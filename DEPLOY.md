@@ -4,7 +4,7 @@
 
 - **Local**: Docker installed
 - **Remote**: Docker + Docker Compose installed, SSH access (key-based recommended)
-- **Config**: `.env` file with your Bybit API credentials
+- **Config**: `.env` file with your MEXC API credentials
 
 ## Quick Start
 
@@ -26,15 +26,28 @@ All configuration is via environment variables in `.env`:
 
 | Variable | Default | Description |
 |---|---|---|
-| `BYBIT_API_KEY` | (required) | Bybit API key |
-| `BYBIT_API_SECRET` | (required) | Bybit API secret |
-| `BYBIT_TESTNET` | `true` | Use testnet (`true`) or mainnet (`false`) |
+| `MEXC_API_KEY` | (required) | MEXC API key |
+| `MEXC_API_SECRET` | (required) | MEXC API secret |
+| `DRY_RUN` | `true` | Dry-run mode (`true`) or live trading (`false`) |
 | `TRADING_MODEL` | `glft` | Model: `glft` or `avellaneda_stoikov` |
-| `FEE_TIER` | `regular` | Fee tier: `regular` or `market_maker` |
-| `KAPPA_MODE` | `live` | Kappa source: `live` or `static` |
+| `FEE_TIER` | `regular` | Fee tier: `regular` or `mx_deduction` |
+| `KAPPA_MODE` | `live` | Kappa source: `live` or `constant` |
 | `INITIAL_CAPITAL` | `1000` | Starting capital in USD |
 | `ORDER_SIZE` | `0.003` | Order size in BTC |
 | `QUOTE_INTERVAL` | `5.0` | Seconds between quote updates |
+
+## Modes
+
+### Dry-Run (default)
+- Connects to real MEXC market data
+- Simulates fills locally (no real orders placed)
+- No capital at risk
+- Use for testing and parameter tuning
+
+### Live
+- Places real LIMIT_MAKER orders on MEXC
+- 0% maker fees on all trades
+- Start with small order sizes (0.0001 BTC / ~$10)
 
 ## Scripts
 

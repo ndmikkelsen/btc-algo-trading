@@ -1,9 +1,8 @@
-"""Bybit fee model with tiered structure.
+"""MEXC fee model with tiered structure.
 
-Models the real-world fee schedule for Bybit spot trading,
-including VIP tiers and the Market Maker Program.
+Models the real-world fee schedule for MEXC spot trading.
 
-Reference: https://www.bybit.com/en/help-center/article/Fee-Structure
+Reference: https://www.mexc.com/fee
 """
 
 from dataclasses import dataclass
@@ -11,42 +10,33 @@ from enum import Enum
 
 
 class FeeTier(Enum):
-    """Bybit spot fee tiers (as of 2025)."""
+    """MEXC spot fee tiers."""
 
     REGULAR = "regular"
-    VIP1 = "vip1"
-    VIP2 = "vip2"
-    MARKET_MAKER = "market_maker"
+    MX_DEDUCTION = "mx_deduction"
 
 
 @dataclass(frozen=True)
 class TierSchedule:
     """Fee rates for a given tier."""
 
-    maker: float  # as decimal (e.g. 0.0002 = 0.02%)
+    maker: float  # as decimal (e.g. 0.0 = 0%)
     taker: float  # as decimal
-    min_monthly_volume: float  # USD threshold to qualify
 
 
-# Bybit spot fee schedule (2025)
+# MEXC spot fee schedule
 FEE_SCHEDULE: dict[FeeTier, TierSchedule] = {
     FeeTier.REGULAR: TierSchedule(
-        maker=0.0002, taker=0.00055, min_monthly_volume=0.0
+        maker=0.0, taker=0.0005,
     ),
-    FeeTier.VIP1: TierSchedule(
-        maker=0.00018, taker=0.0004, min_monthly_volume=1_000_000.0
-    ),
-    FeeTier.VIP2: TierSchedule(
-        maker=0.00016, taker=0.000375, min_monthly_volume=5_000_000.0
-    ),
-    FeeTier.MARKET_MAKER: TierSchedule(
-        maker=-0.00005, taker=0.00025, min_monthly_volume=10_000_000.0
+    FeeTier.MX_DEDUCTION: TierSchedule(
+        maker=0.0, taker=0.0004,
     ),
 }
 
 
 class FeeModel:
-    """Bybit fee calculator with tier-aware costs.
+    """MEXC fee calculator with tier-aware costs.
 
     Parameters
     ----------
@@ -63,7 +53,7 @@ class FeeModel:
         return self._schedule
 
     def maker_fee(self, notional: float) -> float:
-        """Fee (or rebate) for a maker fill.
+        """Fee for a maker fill.
 
         Parameters
         ----------
@@ -73,7 +63,7 @@ class FeeModel:
         Returns
         -------
         float
-            Fee amount in USD. Negative means rebate.
+            Fee amount in USD. Always 0 on MEXC.
         """
         return notional * self._schedule.maker
 
@@ -123,29 +113,7 @@ class FeeModel:
         Returns
         -------
         float
-            Total fee rate (e.g. 0.0004 for 0.04%).
+            Total fee rate.
         """
         exit_rate = self._schedule.maker if maker_both else self._schedule.taker
         return self._schedule.maker + exit_rate
-
-    @staticmethod
-    def effective_tier(monthly_volume: float) -> FeeTier:
-        """Determine which fee tier applies for a given monthly volume.
-
-        Parameters
-        ----------
-        monthly_volume : float
-            Trading volume in USD over the past 30 days.
-
-        Returns
-        -------
-        FeeTier
-            The highest tier the volume qualifies for.
-        """
-        best = FeeTier.REGULAR
-        for tier, schedule in FEE_SCHEDULE.items():
-            if tier == FeeTier.MARKET_MAKER:
-                continue  # requires application, not just volume
-            if monthly_volume >= schedule.min_monthly_volume:
-                best = tier
-        return best
