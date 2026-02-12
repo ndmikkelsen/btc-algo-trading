@@ -126,3 +126,23 @@ MAX_SLIPPAGE_PCT = 0.0001  # 0.01%
 
 # Stop-loss percentage: force-close if unrealized loss exceeds this
 STOP_LOSS_PCT = 0.005  # 0.5%
+
+# =============================================================================
+# Safety Controls (Phase 1)
+# =============================================================================
+
+# Tick filter: reject ticks deviating > this fraction from EMA
+BAD_TICK_THRESHOLD = 0.02  # 2%
+
+# Price displacement: widen spread when price moves > this in lookback window
+DISPLACEMENT_THRESHOLD = 0.001  # 0.1% move triggers widening
+DISPLACEMENT_LOOKBACK = 6       # ticks (6 × 5s = 30s at default interval)
+DISPLACEMENT_AGGRESSION = 2.0   # widening multiplier per threshold unit
+DISPLACEMENT_MAX_MULT = 3.0     # max spread multiplier
+
+# Inventory limits (multiples of order_size)
+INVENTORY_SOFT_LIMIT = 3   # start reducing order size
+INVENTORY_HARD_LIMIT = 5   # stop accumulating, reduce-only
+
+# Post-fill cooldown
+FILL_COOLDOWN_SECONDS = 3.0  # seconds to wait after a fill before re-quoting

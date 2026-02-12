@@ -8,6 +8,7 @@ Supports two modes:
 - dry_run=False: real order placement via MEXC REST API
 """
 
+import time
 import threading
 from datetime import datetime
 from typing import Optional, Dict, List, Set
@@ -37,6 +38,16 @@ from strategies.avellaneda_stoikov.config_optimized import (
     ORDER_SIZE,
     USE_REGIME_FILTER,
     ADX_TREND_THRESHOLD,
+)
+from strategies.avellaneda_stoikov.config import (
+    BAD_TICK_THRESHOLD,
+    DISPLACEMENT_THRESHOLD,
+    DISPLACEMENT_LOOKBACK,
+    DISPLACEMENT_AGGRESSION,
+    DISPLACEMENT_MAX_MULT,
+    INVENTORY_SOFT_LIMIT,
+    INVENTORY_HARD_LIMIT,
+    FILL_COOLDOWN_SECONDS,
 )
 
 
@@ -157,9 +168,36 @@ class LiveTrader:
         # Track processed fills to avoid double-counting
         self._processed_fills: Set[str] = set()
 
+        # Safety controls
+        self._price_ema: float = 0.0
+        self._ema_alpha: float = 0.1
+        self._tick_rejection_count: int = 0
+        self._last_fill_time: float = 0.0
+        self._last_valid_tick_time: float = 0.0
+
         # Threading
         self._stop_event = threading.Event()
         self._quote_thread: Optional[threading.Thread] = None
+
+    def _validate_tick(self, price: float) -> bool:
+        """Reject ticks deviating > BAD_TICK_THRESHOLD from running EMA."""
+        if self._price_ema == 0.0:
+            self._price_ema = price
+            return True
+
+        deviation = abs(price - self._price_ema) / self._price_ema
+        if deviation > BAD_TICK_THRESHOLD:
+            self._tick_rejection_count += 1
+            print(
+                f"[{datetime.now()}] REJECTED TICK: ${price:.2f} "
+                f"(EMA: ${self._price_ema:.2f}, dev: {deviation:.2%})"
+            )
+            return False
+
+        self._price_ema = (
+            self._ema_alpha * price + (1 - self._ema_alpha) * self._price_ema
+        )
+        return True
 
     def _poll_market_data(self):
         """Poll market data and update state from ticker."""
@@ -169,11 +207,19 @@ class LiveTrader:
 
         try:
             price = float(ticker.get("lastPrice", 0))
-            if price > 0:
+            if price > 0 and self._validate_tick(price):
                 self.state.current_price = price
                 self.price_history.append(price)
                 if len(self.price_history) > 100:
                     self.price_history = self.price_history[-100:]
+                self._last_valid_tick_time = time.time()
+
+                # Populate high/low from tick data for regime detection
+                self.high_history.append(price)
+                self.low_history.append(price)
+                if len(self.high_history) > 100:
+                    self.high_history = self.high_history[-100:]
+                    self.low_history = self.low_history[-100:]
 
             bid = float(ticker.get("bid1Price", 0))
             ask = float(ticker.get("ask1Price", 0))
@@ -238,6 +284,25 @@ class LiveTrader:
         spread_profit = (ask - bid) * self.order_size
         return spread_profit > round_trip_fee
 
+    def _calculate_displacement_multiplier(self) -> float:
+        """Calculate spread multiplier based on recent price displacement."""
+        if len(self.price_history) < DISPLACEMENT_LOOKBACK + 1:
+            return 1.0
+
+        price_now = self.price_history[-1]
+        price_ago = self.price_history[-DISPLACEMENT_LOOKBACK - 1]
+        displacement = abs(price_now - price_ago) / price_ago
+
+        if displacement > DISPLACEMENT_THRESHOLD:
+            mult = min(
+                DISPLACEMENT_MAX_MULT,
+                1.0 + DISPLACEMENT_AGGRESSION
+                * (displacement - DISPLACEMENT_THRESHOLD)
+                / DISPLACEMENT_THRESHOLD,
+            )
+            return mult
+        return 1.0
+
     def _calculate_quotes(self) -> tuple:
         """Calculate optimal bid/ask quotes."""
         if self.state.current_price <= 0:
@@ -255,11 +320,30 @@ class LiveTrader:
             time_remaining=time_remaining,
         )
 
+        # Price displacement guard: widen spread during fast moves
+        mult = self._calculate_displacement_multiplier()
+        if mult > 1.0:
+            mid = (bid + ask) / 2
+            half = (ask - bid) / 2
+            half *= mult
+            bid = mid - half
+            ask = mid + half
+            print(
+                f"[{datetime.now()}] DISPLACEMENT GUARD: "
+                f"spread widened {mult:.1f}×"
+            )
+
         return bid, ask
 
     def _update_quotes(self):
         """Update quotes on exchange."""
         try:
+            # Post-fill cooldown: let market settle after a fill
+            if self._last_fill_time > 0:
+                elapsed = time.time() - self._last_fill_time
+                if elapsed < FILL_COOLDOWN_SECONDS:
+                    return
+
             # Check if we should trade
             if not self._should_trade():
                 if self.state.bid_order_id or self.state.ask_order_id:
@@ -280,6 +364,19 @@ class LiveTrader:
             if not self._is_spread_profitable(bid, ask):
                 return
 
+            # Inventory limits: reduce or skip orders on accumulating side
+            inv = self.state.inventory
+            q_soft = INVENTORY_SOFT_LIMIT * self.order_size
+            q_hard = INVENTORY_HARD_LIMIT * self.order_size
+            skip_buy = False
+            skip_sell = False
+
+            if abs(inv) > q_soft:
+                if inv > 0 and abs(inv) >= q_hard:
+                    skip_buy = True
+                elif inv < 0 and abs(inv) >= q_hard:
+                    skip_sell = True
+
             # Check if quotes changed significantly (> 0.1%)
             should_update = False
             if self.state.bid_price is None or self.state.ask_price is None:
@@ -295,24 +392,38 @@ class LiveTrader:
             # Cancel existing orders
             self._cancel_all_orders()
 
-            # Place new LIMIT_MAKER orders
-            bid_result = self.client.place_maker_order(
-                symbol=self.symbol,
-                side="Buy",
-                qty=str(self.order_size),
-                price=str(round(bid, 2)),
-            )
-            self.state.bid_order_id = bid_result.get("orderId")
-            self.state.bid_price = bid
+            # Place new LIMIT_MAKER orders (respect inventory limits)
+            if not skip_buy:
+                bid_result = self.client.place_maker_order(
+                    symbol=self.symbol,
+                    side="Buy",
+                    qty=str(self.order_size),
+                    price=str(round(bid, 2)),
+                )
+                self.state.bid_order_id = bid_result.get("orderId")
+                self.state.bid_price = bid
+            else:
+                self.state.bid_price = bid
+                print(
+                    f"[{datetime.now()}] INV LIMIT: skipping buy "
+                    f"(inv={inv:.6f}, hard={q_hard:.6f})"
+                )
 
-            ask_result = self.client.place_maker_order(
-                symbol=self.symbol,
-                side="Sell",
-                qty=str(self.order_size),
-                price=str(round(ask, 2)),
-            )
-            self.state.ask_order_id = ask_result.get("orderId")
-            self.state.ask_price = ask
+            if not skip_sell:
+                ask_result = self.client.place_maker_order(
+                    symbol=self.symbol,
+                    side="Sell",
+                    qty=str(self.order_size),
+                    price=str(round(ask, 2)),
+                )
+                self.state.ask_order_id = ask_result.get("orderId")
+                self.state.ask_price = ask
+            else:
+                self.state.ask_price = ask
+                print(
+                    f"[{datetime.now()}] INV LIMIT: skipping sell "
+                    f"(inv={inv:.6f}, hard={-q_hard:.6f})"
+                )
 
             spread_bps = (ask - bid) / self.state.current_price * 10000
             print(
@@ -359,9 +470,11 @@ class LiveTrader:
                             self.state.cash += notional - fee
 
                         self.state.trades_count += 1
+                        self._last_fill_time = time.time()
                         print(
                             f"[{datetime.now()}] FILL: {side} {qty} "
-                            f"@ ${price:.2f} (fee: ${fee:.4f})"
+                            f"@ ${price:.2f} (fee: ${fee:.4f}) "
+                            f"[inv: {self.state.inventory:.6f}]"
                         )
             else:
                 # In live mode, check order history
@@ -390,9 +503,11 @@ class LiveTrader:
                             self.state.cash += notional - fee
 
                         self.state.trades_count += 1
+                        self._last_fill_time = time.time()
                         print(
                             f"[{datetime.now()}] FILL: {side} {qty} "
-                            f"@ ${price:.2f} (fee: ${fee:.4f})"
+                            f"@ ${price:.2f} (fee: ${fee:.4f}) "
+                            f"[inv: {self.state.inventory:.6f}]"
                         )
 
         except Exception as e:
@@ -404,6 +519,20 @@ class LiveTrader:
             try:
                 # Poll market data (replaces WebSocket)
                 self._poll_market_data()
+
+                # Stale data protection: pull quotes if no valid tick
+                if (
+                    self._last_valid_tick_time > 0
+                    and time.time() - self._last_valid_tick_time > 15.0
+                ):
+                    if self.state.bid_order_id or self.state.ask_order_id:
+                        self._cancel_all_orders()
+                        print(
+                            f"[{datetime.now()}] STALE DATA — "
+                            f"orders pulled (no valid tick for 15s)"
+                        )
+                    self._stop_event.wait(self.quote_interval)
+                    continue
 
                 self._update_quotes()
                 self._check_fills()
@@ -461,6 +590,10 @@ class LiveTrader:
             print(f"Spread Bounds:  ${min_s:.2f} - ${max_s:.2f}")
             print(f"Est. Spread:    ~${est_spread:.0f} ({est_bps:.1f} bps) at σ=0.5%, mid=$100k")
 
+        print(f"Safety:         tick_filter={BAD_TICK_THRESHOLD:.0%} | "
+              f"inv_limit={INVENTORY_SOFT_LIMIT}/{INVENTORY_HARD_LIMIT}× | "
+              f"cooldown={FILL_COOLDOWN_SECONDS}s | "
+              f"disp_guard={DISPLACEMENT_THRESHOLD:.1%}")
         print("=" * 60)
 
         # Start quote loop (polls market data inline)
@@ -500,6 +633,7 @@ class LiveTrader:
         print(f"Total P&L:       ${self.state.total_pnl:,.2f}")
         print(f"Total Fees:      ${self.state.total_fees:,.4f}")
         print(f"Total Trades:    {self.state.trades_count}")
+        print(f"Ticks Rejected:  {self._tick_rejection_count}")
         print(f"Errors:          {len(self.state.errors)}")
         print("=" * 60)
 
