@@ -64,7 +64,7 @@ MIN_SPREAD_DOLLAR = 5.0  # $5 minimum spread (~5 bps at $100k BTC)
 
 # Maximum spread in dollars
 # Ceiling to prevent quotes that are too wide
-MAX_SPREAD_DOLLAR = 500.0  # $500 maximum spread (~50 bps at $100k BTC)
+MAX_SPREAD_DOLLAR = 100.0  # $100 maximum spread (~10 bps at $100k BTC)
 
 # Legacy percentage-based spreads (used by tests expecting pct interface)
 MIN_SPREAD = 0.0005  # 0.05% — will be overridden by dollar-based in model

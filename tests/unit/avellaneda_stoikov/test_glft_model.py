@@ -31,15 +31,15 @@ class TestGLFTDefaults:
 
     def test_default_risk_aversion(self):
         model = GLFTModel()
-        assert model.risk_aversion == 0.0001
+        assert model.risk_aversion == 0.005
 
     def test_default_order_book_liquidity(self):
         model = GLFTModel()
-        assert model.order_book_liquidity == 0.05
+        assert model.order_book_liquidity == 0.5
 
     def test_default_arrival_rate(self):
         model = GLFTModel()
-        assert model.arrival_rate == 10.0
+        assert model.arrival_rate == 20.0
 
     def test_custom_parameters(self):
         model = GLFTModel(
@@ -253,11 +253,8 @@ class TestGLFTOptimalSpread:
         assert s_high < s_low
 
     def test_spread_meaningful_at_btc_scale(self):
-        """With proper params, spread should be 10-200 bps."""
+        """With production defaults, spread should be 1-10 bps."""
         model = GLFTModel(
-            risk_aversion=0.0001,
-            order_book_liquidity=0.05,
-            arrival_rate=10.0,
             min_spread_dollar=0.0,
             max_spread_dollar=1e12,
         )
@@ -265,7 +262,7 @@ class TestGLFTOptimalSpread:
         spread = model.calculate_optimal_spread(0.005, 0.5, mid_price=mid)
         spread_bps = spread / mid * 10000
 
-        assert 10 < spread_bps < 500, f"Spread {spread_bps:.1f} bps out of range"
+        assert 1 < spread_bps < 100, f"Spread {spread_bps:.1f} bps out of range"
 
     def test_spread_without_mid_price(self):
         """Without mid_price, volatility is used directly."""

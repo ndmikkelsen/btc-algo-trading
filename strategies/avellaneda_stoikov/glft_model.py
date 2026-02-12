@@ -43,9 +43,9 @@ from strategies.avellaneda_stoikov.config import (
 )
 
 # GLFT-specific defaults (dollar-space units)
-GLFT_DEFAULT_RISK_AVERSION = 0.0001       # γ in 1/$²
-GLFT_DEFAULT_ORDER_BOOK_LIQUIDITY = 0.05  # κ in 1/$
-GLFT_DEFAULT_ARRIVAL_RATE = 10.0          # A in trades/period
+GLFT_DEFAULT_RISK_AVERSION = 0.005        # γ in 1/$²
+GLFT_DEFAULT_ORDER_BOOK_LIQUIDITY = 0.5   # κ in 1/$
+GLFT_DEFAULT_ARRIVAL_RATE = 20.0          # A in trades/period
 
 
 class GLFTModel(MarketMakingModel):

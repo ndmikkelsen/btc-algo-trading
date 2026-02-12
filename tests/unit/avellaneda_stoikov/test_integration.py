@@ -162,12 +162,12 @@ class TestPipelineWiring:
         collector = OrderBookCollector()
         provider = LiveKappaProvider(
             collector=collector,
-            default_kappa=0.014,
-            default_A=1.0,
+            default_kappa=0.5,
+            default_A=20.0,
         )
         kappa, A = provider.get_kappa()
-        assert kappa == 0.014
-        assert A == 1.0
+        assert kappa == 0.5
+        assert A == 20.0
 
     def test_collector_with_data_attempts_calibration(self):
         """With enough data, calibration is attempted."""
@@ -176,8 +176,8 @@ class TestPipelineWiring:
         provider = LiveKappaProvider(
             collector=collector,
             calibrator=calibrator,
-            default_kappa=0.014,
-            default_A=1.0,
+            default_kappa=0.5,
+            default_A=20.0,
         )
 
         # Add a snapshot for mid price reference
@@ -207,6 +207,7 @@ class TestPipelineWiring:
             risk_aversion=0.0001,
             order_book_liquidity=0.05,
             arrival_rate=10.0,
+            max_spread_dollar=1e12,
         )
 
         bid1, ask1 = model.calculate_quotes(

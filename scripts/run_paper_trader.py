@@ -29,10 +29,16 @@ from dotenv import load_dotenv
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from strategies.avellaneda_stoikov.glft_model import GLFTModel
+from strategies.avellaneda_stoikov.glft_model import (
+    GLFTModel,
+    GLFT_DEFAULT_RISK_AVERSION,
+    GLFT_DEFAULT_ORDER_BOOK_LIQUIDITY,
+    GLFT_DEFAULT_ARRIVAL_RATE,
+)
 from strategies.avellaneda_stoikov.model import AvellanedaStoikov
 from strategies.avellaneda_stoikov.fee_model import FeeModel, FeeTier
 from strategies.avellaneda_stoikov.kappa_provider import ConstantKappaProvider
+from strategies.avellaneda_stoikov.config import MIN_SPREAD_DOLLAR, MAX_SPREAD_DOLLAR
 from strategies.avellaneda_stoikov.live_trader import LiveTrader
 
 
@@ -88,6 +94,36 @@ def parse_args():
         help="Disable regime detection filter",
     )
     parser.add_argument(
+        "--gamma",
+        type=float,
+        default=GLFT_DEFAULT_RISK_AVERSION,
+        help=f"Risk aversion γ in 1/$² (default: {GLFT_DEFAULT_RISK_AVERSION})",
+    )
+    parser.add_argument(
+        "--kappa-value",
+        type=float,
+        default=GLFT_DEFAULT_ORDER_BOOK_LIQUIDITY,
+        help=f"κ value for --kappa=constant mode (default: {GLFT_DEFAULT_ORDER_BOOK_LIQUIDITY})",
+    )
+    parser.add_argument(
+        "--arrival-rate",
+        type=float,
+        default=GLFT_DEFAULT_ARRIVAL_RATE,
+        help=f"Arrival rate A for --kappa=constant mode (default: {GLFT_DEFAULT_ARRIVAL_RATE})",
+    )
+    parser.add_argument(
+        "--max-spread",
+        type=float,
+        default=MAX_SPREAD_DOLLAR,
+        help=f"Maximum spread in dollars (default: {MAX_SPREAD_DOLLAR})",
+    )
+    parser.add_argument(
+        "--min-spread",
+        type=float,
+        default=MIN_SPREAD_DOLLAR,
+        help=f"Minimum spread in dollars (default: {MIN_SPREAD_DOLLAR})",
+    )
+    parser.add_argument(
         "--live",
         action="store_true",
         help="Enable live trading (real orders). Default is dry-run.",
@@ -95,10 +131,14 @@ def parse_args():
     return parser.parse_args()
 
 
-def build_model(model_name: str):
-    """Create the market making model."""
-    if model_name == "glft":
-        return GLFTModel()
+def build_model(args):
+    """Create the market making model from CLI args."""
+    if args.model == "glft":
+        return GLFTModel(
+            risk_aversion=args.gamma,
+            min_spread_dollar=args.min_spread,
+            max_spread_dollar=args.max_spread,
+        )
     return AvellanedaStoikov()
 
 
@@ -131,12 +171,16 @@ def main():
         sys.exit(1)
 
     dry_run = not args.live
-    model = build_model(args.model)
+    model = build_model(args)
     fee_model = FeeModel(FEE_TIER_MAP[args.fee_tier])
 
     # For constant kappa, pass an explicit provider; for live mode,
     # LiveTrader creates a LiveKappaProvider backed by its internal collector
-    kappa_provider = ConstantKappaProvider() if args.kappa == "constant" else None
+    kappa_provider = (
+        ConstantKappaProvider(kappa=args.kappa_value, A=args.arrival_rate)
+        if args.kappa == "constant"
+        else None
+    )
 
     # Create trader
     trader = LiveTrader(

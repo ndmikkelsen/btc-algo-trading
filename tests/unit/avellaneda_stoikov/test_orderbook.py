@@ -295,8 +295,8 @@ class TestConstantKappaProvider:
     def test_default_values(self):
         provider = ConstantKappaProvider()
         kappa, A = provider.get_kappa()
-        assert kappa == 0.014
-        assert A == 1.0
+        assert kappa == 0.5
+        assert A == 20.0
 
     def test_is_kappa_provider(self):
         provider = ConstantKappaProvider()

@@ -443,6 +443,24 @@ class LiveTrader:
         print(f"Kappa Mode:     {kappa_mode}")
         print(f"Regime Filter:  {'ON' if self.use_regime_filter else 'OFF'}")
         print(f"Quote Interval: {self.quote_interval}s")
+
+        # GLFT parameter summary
+        if hasattr(self.model, 'risk_aversion'):
+            gamma = self.model.risk_aversion
+            kappa, A = self.kappa_provider.get_kappa()
+            min_s = self.model.min_spread_dollar
+            max_s = self.model.max_spread_dollar
+            # Estimate spread at σ=0.5%, mid=$100k
+            sigma_est = 500.0  # 0.5% × $100k
+            import numpy as np
+            adverse = (1 / kappa) * np.log(1 + kappa / gamma) if kappa > 0 and gamma > 0 else 0
+            vol_term = np.sqrt(np.e * sigma_est**2 * gamma / (2 * A * kappa)) if A > 0 and kappa > 0 else 0
+            est_spread = 2 * (adverse + vol_term)
+            est_bps = est_spread / 100000 * 10000
+            print(f"Model Params:   γ={gamma}  κ={kappa}  A={A}")
+            print(f"Spread Bounds:  ${min_s:.2f} - ${max_s:.2f}")
+            print(f"Est. Spread:    ~${est_spread:.0f} ({est_bps:.1f} bps) at σ=0.5%, mid=$100k")
+
         print("=" * 60)
 
         # Start quote loop (polls market data inline)

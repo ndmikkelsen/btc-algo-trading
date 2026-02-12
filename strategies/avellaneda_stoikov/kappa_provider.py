@@ -4,7 +4,7 @@ Provides different strategies for obtaining the kappa (order book intensity)
 parameter:
 
 - ConstantKappaProvider: Fixed values for tests and backtests.
-- LiveKappaProvider: Real-time calibration from WebSocket trade data.
+- LiveKappaProvider: Real-time calibration from trade data.
 - HistoricalKappaProvider: Reads from stored calibration data.
 """
 
@@ -48,7 +48,7 @@ class ConstantKappaProvider(KappaProvider):
         A: Fixed arrival rate in trades/second.
     """
 
-    def __init__(self, kappa: float = 0.014, A: float = 1.0):
+    def __init__(self, kappa: float = 0.5, A: float = 20.0):
         self._kappa = kappa
         self._A = A
 
@@ -74,8 +74,8 @@ class LiveKappaProvider(KappaProvider):
         self,
         collector: OrderBookCollector,
         calibrator: Optional[KappaCalibrator] = None,
-        default_kappa: float = 0.014,
-        default_A: float = 1.0,
+        default_kappa: float = 0.5,
+        default_A: float = 20.0,
     ):
         self._collector = collector
         self._calibrator = calibrator or KappaCalibrator()
@@ -123,8 +123,8 @@ class HistoricalKappaProvider(KappaProvider):
     def __init__(
         self,
         data: Optional[List[Tuple[float, float, float]]] = None,
-        default_kappa: float = 0.014,
-        default_A: float = 1.0,
+        default_kappa: float = 0.5,
+        default_A: float = 20.0,
     ):
         self._data = data or []
         self._default_kappa = default_kappa
