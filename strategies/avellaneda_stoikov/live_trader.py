@@ -1,11 +1,16 @@
 """Live/Paper trader for market making strategies.
 
-Connects to MEXC and executes a market making model (GLFT or A-S) in
-real-time with live kappa calibration and fee tracking.
+Supports MEXC spot trading or Bybit futures trading with leverage.
+Executes market making models (GLFT or A-S) with live kappa calibration
+and fee tracking.
 
-Supports two modes:
+Supported exchanges:
+- MEXC spot (use_futures=False): 0% maker fees, good for spot market making
+- Bybit futures (use_futures=True): 50-100x leverage for HFT
+
+Trading modes:
 - dry_run=True (default): real market data, simulated fills locally
-- dry_run=False: real order placement via MEXC REST API
+- dry_run=False: real order placement via exchange REST API
 """
 
 import time
@@ -100,12 +105,17 @@ class LiveTrader:
     """
     Live trader using a MarketMakingModel (GLFT or A-S).
 
-    Connects to MEXC and:
+    Supports both MEXC spot and Bybit futures:
+    - MEXC spot: 0% maker fees, good for low-frequency strategies
+    - Bybit futures: 50-100x leverage, 0.01% maker fees, HFT-optimized
+
+    Features:
     - Polls real-time price + order book data via REST
-    - Calibrates kappa from live trade flow via KappaProvider
+    - Calibrates kappa from live trade flow (spot only)
     - Calculates optimal quotes using the model
-    - Places/updates LIMIT_MAKER orders (0% maker fee)
-    - Tracks fees via FeeModel and manages inventory
+    - Places/updates LIMIT_MAKER orders
+    - Tracks fees and manages inventory/positions
+    - Liquidation protection for leveraged futures trading
     """
 
     def __init__(
