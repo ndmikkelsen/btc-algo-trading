@@ -2,9 +2,38 @@
 
 > Working memory for implementing the Avellaneda-Stoikov market making model.
 
+## Recent Work
+
+**Session**: 2026-02-12
+**Branch**: algo-imp
+**Last Commit**: 792e58a - chore: sync and format to-do.md from Beads
+
+### Major Milestone: Bybit Futures HFT System
+- **Pivoted from MEXC to Bybit** - Discovered MEXC Futures is institutional-only
+- **Complete Bybit Futures integration** with 50x leverage support
+- **Liquidation protection system** - Emergency position reduction at 20% threshold
+- **Isolated margin mode** with configurable leverage (1-100x)
+- **Comprehensive testing framework** - Automated validation suite
+- **Full documentation suite** - DEPLOYMENT.md, README_FUTURES.md, PRE_DEPLOYMENT_CHECKLIST.md
+
+### Architecture Changes
+- Added bybit_futures_client.py (600+ lines) - Production Bybit API client with liquidation monitoring
+- Updated live_trader.py - Futures mode support, position tracking (vs inventory)
+- Updated config.py - Futures configuration (leverage, liquidation thresholds)
+- Updated fee_model.py - Bybit VIP0/VIP1 fee tiers
+- Enhanced run_paper_trader.py - --futures and --leverage CLI flags
+- Dual exchange support - MEXC spot (0% maker fees) + Bybit futures (50x leverage)
+
+### Next Major Steps
+- Week 1: Run automated test suite on server (Task #6)
+- Week 1: Complete pre-deployment checklist (Task #7)
+- Week 2: Conservative live test with 10x leverage (Task #8)
+- Week 3: Scale to 25x leverage if profitable (Task #9)
+- Week 4+: Production deployment with 50x leverage (Task #10)
+
 ## Current Focus
 
-**Validating A-S Strategy via Paper Trading on Bybit Testnet**
+**Validating A-S Strategy via Paper Trading on Bybit Futures**
 
 ## Overview
 
