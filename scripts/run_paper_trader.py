@@ -27,6 +27,7 @@ import argparse
 import os
 import sys
 import signal
+import time
 
 from dotenv import load_dotenv
 
@@ -252,7 +253,7 @@ def main():
 
         # Keep running until interrupted
         while trader.state.is_running:
-            signal.pause()
+            time.sleep(1)  # More reliable than signal.pause()
 
     except KeyboardInterrupt:
         trader.stop()

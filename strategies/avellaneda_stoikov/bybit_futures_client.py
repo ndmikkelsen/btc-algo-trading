@@ -5,6 +5,7 @@ Provides both live trading (BybitFuturesClient) and simulated trading
 (DryRunFuturesClient) with leverage, liquidation, and position management.
 """
 
+import os
 import time
 from typing import Optional, Dict, List
 import ccxt
@@ -13,21 +14,43 @@ import ccxt
 class BybitFuturesClient:
     """Bybit futures client using ccxt library for perpetual contracts."""
 
-    def __init__(self, api_key: str, api_secret: str, testnet: bool = False):
+    def __init__(
+        self,
+        api_key: str,
+        api_secret: str,
+        testnet: bool = False,
+        proxy: Optional[str] = None
+    ):
         """Initialize Bybit futures client.
 
         Args:
             api_key: Bybit API key
             api_secret: Bybit API secret
             testnet: Use testnet if True (Bybit supports testnet)
+            proxy: SOCKS5 proxy URL (e.g., 'socks5://host:port' or 'socks5://user:pass@host:port')
+                   If None, reads from SOCKS5_PROXY environment variable
         """
-        self.exchange = ccxt.bybit({
+        # Read proxy from environment if not provided
+        if proxy is None:
+            proxy = os.getenv('SOCKS5_PROXY')
+
+        config = {
             'apiKey': api_key,
             'secret': api_secret,
             'options': {
                 'defaultType': 'swap',  # Perpetual futures
             }
-        })
+        }
+
+        # Add proxy configuration if provided
+        if proxy:
+            config['proxies'] = {
+                'http': proxy,
+                'https': proxy,
+            }
+            print(f"Using proxy: {proxy}")
+
+        self.exchange = ccxt.bybit(config)
 
         if testnet:
             self.exchange.set_sandbox_mode(True)
@@ -117,6 +140,11 @@ class BybitFuturesClient:
             params=order_params
         )
 
+    def place_maker_order(self, symbol: str, side: str, price: float, qty: Optional[float] = None, amount: Optional[float] = None) -> Dict:
+        """Alias for place_order with postOnly (maker-only)."""
+        order_amount = qty if qty is not None else amount
+        return self.place_order(symbol, side, order_amount, price, order_type='limit')
+
     def cancel_all_orders(self, symbol: str):
         """Cancel all open orders for symbol.
 
@@ -152,7 +180,8 @@ class DryRunFuturesClient:
         self,
         initial_balance: float = 1000.0,
         leverage: int = 50,
-        symbol: str = 'BTC/USDT:USDT'
+        symbol: str = 'BTC/USDT:USDT',
+        proxy: Optional[str] = None
     ):
         """Initialize dry-run futures client.
 
@@ -160,6 +189,8 @@ class DryRunFuturesClient:
             initial_balance: Starting balance in USDT
             leverage: Leverage multiplier (1-100)
             symbol: Trading symbol
+            proxy: SOCKS5 proxy URL (e.g., 'socks5://host:port' or 'socks5://user:pass@host:port')
+                   If None, reads from SOCKS5_PROXY environment variable
         """
         self.initial_balance = initial_balance
         self.balance = initial_balance
@@ -171,8 +202,22 @@ class DryRunFuturesClient:
         self.open_orders: Dict[str, Dict] = {}
         self.order_counter = 0
 
+        # Read proxy from environment if not provided
+        if proxy is None:
+            proxy = os.getenv('SOCKS5_PROXY')
+
         # Connect to real market data (read-only)
-        self.exchange = ccxt.bybit({'options': {'defaultType': 'swap'}})
+        config = {'options': {'defaultType': 'swap'}}
+
+        # Add proxy configuration if provided
+        if proxy:
+            config['proxies'] = {
+                'http': proxy,
+                'https': proxy,
+            }
+            print(f"Using proxy: {proxy}")
+
+        self.exchange = ccxt.bybit(config)
         try:
             self.exchange.load_markets()
         except Exception as e:
@@ -237,9 +282,14 @@ class DryRunFuturesClient:
             Ticker dict from real market
         """
         try:
-            return self.exchange.fetch_ticker(symbol)
+            print(f"[DEBUG] Fetching ticker for {symbol}...")
+            ticker = self.exchange.fetch_ticker(symbol)
+            print(f"[DEBUG] Ticker fetched: last={ticker.get('last', 0)}")
+            return ticker
         except Exception as e:
             print(f"Error fetching ticker: {e}")
+            import traceback
+            traceback.print_exc()
             # Return dummy data if market fetch fails
             return {
                 'last': 0,
@@ -307,6 +357,11 @@ class DryRunFuturesClient:
         }
 
         return {'orderId': order_id, 'status': 'open'}
+
+    def place_maker_order(self, symbol: str, side: str, price: float, qty: Optional[float] = None, amount: Optional[float] = None) -> Dict:
+        """Alias for place_order (simulated maker order)."""
+        order_amount = qty if qty is not None else amount
+        return self.place_order(symbol, side, order_amount, price, order_type='limit')
 
     def cancel_all_orders(self, symbol: str):
         """Cancel all simulated open orders.

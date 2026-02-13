@@ -13,6 +13,7 @@ Trading modes:
 - dry_run=False: real order placement via exchange REST API
 """
 
+import os
 import time
 import threading
 from datetime import datetime
@@ -151,12 +152,14 @@ class LiveTrader:
                     initial_balance=initial_capital,
                     leverage=leverage,
                     symbol=symbol,
+                    proxy=os.getenv('SOCKS5_PROXY'),  # Read proxy from environment
                 )
             else:
                 self.client = BybitFuturesClient(
                     api_key=api_key,
                     api_secret=api_secret,
                     testnet=False,
+                    proxy=os.getenv('SOCKS5_PROXY'),  # Read proxy from environment
                 )
                 # Set leverage and margin mode
                 try:
@@ -285,7 +288,8 @@ class LiveTrader:
             return
 
         try:
-            price = float(ticker.get("lastPrice", 0))
+            # ccxt uses 'last' for Bybit, 'lastPrice' for some other exchanges
+            price = float(ticker.get("last") or ticker.get("lastPrice") or 0)
             if price > 0 and self._validate_tick(price):
                 self.state.current_price = price
                 self.price_history.append(price)
@@ -300,8 +304,9 @@ class LiveTrader:
                     self.high_history = self.high_history[-100:]
                     self.low_history = self.low_history[-100:]
 
-            bid = float(ticker.get("bid1Price", 0))
-            ask = float(ticker.get("ask1Price", 0))
+            # ccxt uses 'bid'/'ask' for Bybit, 'bid1Price'/'ask1Price' for some exchanges
+            bid = float(ticker.get("bid") or ticker.get("bid1Price") or 0)
+            ask = float(ticker.get("ask") or ticker.get("ask1Price") or 0)
             if bid > 0 and ask > 0:
                 self.state.current_spread = (ask - bid) / bid
 
@@ -841,10 +846,13 @@ class LiveTrader:
 
     def _quote_loop(self):
         """Main loop for updating quotes."""
+        print("[DEBUG] Quote loop started")
         while not self._stop_event.is_set():
             try:
                 # Poll market data (replaces WebSocket)
+                print("[DEBUG] Polling market data...")
                 self._poll_market_data()
+                print("[DEBUG] Market data polled successfully")
 
                 # Stale data protection: pull quotes if no valid tick
                 if (
@@ -875,9 +883,14 @@ class LiveTrader:
                     )
 
             except Exception as e:
+                print(f"[DEBUG] Exception in quote loop: {e}")
+                import traceback
+                traceback.print_exc()
                 self.state.errors.append(f"Loop error: {e}")
 
             self._stop_event.wait(self.quote_interval)
+
+        print("[DEBUG] Quote loop exited")
 
     def start(self):
         """Start the trader."""
