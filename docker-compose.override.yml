@@ -1,0 +1,16 @@
+# Development overrides -- applied automatically by `docker compose up`
+#
+# Mounts source code into the container so changes are reflected without
+# rebuilding. Enable DEBUG logging for verbose output.
+#
+# To run WITHOUT dev overrides:
+#   docker compose -f docker-compose.yml up -d
+
+services:
+  trader:
+    volumes:
+      - ./logs:/app/logs
+      - ./strategies:/app/strategies:ro
+      - ./scripts:/app/scripts:ro
+    environment:
+      - LOG_LEVEL=DEBUG
