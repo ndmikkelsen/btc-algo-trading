@@ -146,3 +146,47 @@ INVENTORY_HARD_LIMIT = 5   # stop accumulating, reduce-only
 
 # Post-fill cooldown
 FILL_COOLDOWN_SECONDS = 3.0  # seconds to wait after a fill before re-quoting
+
+# =============================================================================
+# Phase 2: Advanced Risk Controls
+# =============================================================================
+
+# Dynamic gamma: adjust risk aversion based on realized volatility
+DYNAMIC_GAMMA_ENABLED = True
+VOLATILITY_LOOKBACK = 20        # ticks for realized vol calculation
+VOLATILITY_REFERENCE = 0.005    # reference volatility (0.5%) for gamma scaling
+GAMMA_MIN_MULT = 0.5           # min gamma multiplier (during low vol)
+GAMMA_MAX_MULT = 3.0           # max gamma multiplier (during high vol)
+
+# Dual-timeframe volatility: use max of fast/slow for conservative sizing
+DUAL_TIMEFRAME_VOL_ENABLED = True
+VOL_FAST_WINDOW = 20           # fast volatility window (100s at 5s interval)
+VOL_SLOW_WINDOW = 100          # slow volatility window (500s at 5s interval)
+
+# Asymmetric spreads: widen unfavorable side during trends
+ASYMMETRIC_SPREADS_ENABLED = True
+MOMENTUM_LOOKBACK = 20         # ticks for momentum calculation (100s at 5s interval)
+MOMENTUM_THRESHOLD = 0.0008    # 0.08% move triggers asymmetry
+ASYMMETRY_AGGRESSION = 1.2     # multiplier for unfavorable side
+
+# Fill rate imbalance: detect adverse selection from one-sided fills
+FILL_IMBALANCE_ENABLED = True
+FILL_IMBALANCE_WINDOW = 10     # number of recent fills to track
+FILL_IMBALANCE_THRESHOLD = 0.7 # 70%+ fills on one side triggers widening
+IMBALANCE_WIDENING = 1.3       # multiplier for imbalanced side
+
+# =============================================================================
+# Futures Trading Configuration
+# =============================================================================
+
+# Futures mode
+USE_FUTURES = False  # Set to True for Bybit futures, False for spot
+LEVERAGE = 50        # Leverage multiplier (1-100 for Bybit)
+MARGIN_MODE = 'isolated'  # 'isolated' or 'cross' margin
+
+# Liquidation protection
+LIQUIDATION_THRESHOLD = 0.20  # Emergency reduce when within 20% of liquidation
+EMERGENCY_REDUCE_RATIO = 0.5  # Reduce position by 50% when approaching liquidation
+
+# Bybit futures symbol
+FUTURES_SYMBOL = 'BTC/USDT:USDT'  # Bybit perpetual contract symbol

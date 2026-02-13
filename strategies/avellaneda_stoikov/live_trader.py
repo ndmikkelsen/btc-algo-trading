@@ -33,6 +33,11 @@ from strategies.avellaneda_stoikov.mexc_client import (
     MexcConfig,
     MexcMarketPoller,
 )
+from strategies.avellaneda_stoikov.bybit_futures_client import (
+    BybitFuturesClient,
+    DryRunFuturesClient,
+    BybitMarketPoller,
+)
 from strategies.avellaneda_stoikov.config_optimized import (
     INITIAL_CAPITAL,
     ORDER_SIZE,
@@ -48,6 +53,26 @@ from strategies.avellaneda_stoikov.config import (
     INVENTORY_SOFT_LIMIT,
     INVENTORY_HARD_LIMIT,
     FILL_COOLDOWN_SECONDS,
+    DYNAMIC_GAMMA_ENABLED,
+    VOLATILITY_LOOKBACK,
+    VOLATILITY_REFERENCE,
+    GAMMA_MIN_MULT,
+    GAMMA_MAX_MULT,
+    DUAL_TIMEFRAME_VOL_ENABLED,
+    VOL_FAST_WINDOW,
+    VOL_SLOW_WINDOW,
+    ASYMMETRIC_SPREADS_ENABLED,
+    MOMENTUM_LOOKBACK,
+    MOMENTUM_THRESHOLD,
+    ASYMMETRY_AGGRESSION,
+    FILL_IMBALANCE_ENABLED,
+    FILL_IMBALANCE_WINDOW,
+    FILL_IMBALANCE_THRESHOLD,
+    IMBALANCE_WIDENING,
+    USE_FUTURES,
+    LEVERAGE,
+    LIQUIDATION_THRESHOLD,
+    EMERGENCY_REDUCE_RATIO,
 )
 
 
@@ -96,6 +121,8 @@ class LiveTrader:
         model: Optional[MarketMakingModel] = None,
         fee_model: Optional[FeeModel] = None,
         kappa_provider: Optional[KappaProvider] = None,
+        use_futures: bool = USE_FUTURES,
+        leverage: int = LEVERAGE,
     ):
         self.symbol = symbol
         self.initial_capital = initial_capital
@@ -103,20 +130,57 @@ class LiveTrader:
         self.use_regime_filter = use_regime_filter
         self.quote_interval = quote_interval
         self.dry_run = dry_run
+        self.use_futures = use_futures
+        self.leverage = leverage
 
-        # MEXC client
-        self.config = MexcConfig(
-            api_key=api_key,
-            api_secret=api_secret,
-        )
-        if dry_run:
-            self.client = DryRunClient(
-                self.config,
-                initial_usdt=initial_capital,
-                initial_btc=0.0,
-            )
+        # Create exchange client (MEXC spot or Bybit futures)
+        if use_futures:
+            # Bybit futures client
+            if dry_run:
+                self.client = DryRunFuturesClient(
+                    initial_balance=initial_capital,
+                    leverage=leverage,
+                    symbol=symbol,
+                )
+            else:
+                self.client = BybitFuturesClient(
+                    api_key=api_key,
+                    api_secret=api_secret,
+                    testnet=False,
+                )
+                # Set leverage and margin mode
+                try:
+                    self.client.set_leverage(symbol, leverage)
+                    self.client.set_margin_mode(symbol, 'isolated')
+                except Exception as e:
+                    print(f"Warning: Could not set leverage/margin: {e}")
+
+            self.poller = BybitMarketPoller(client=self.client, symbol=symbol)
+            self.collector = None  # No order book collector for futures yet
         else:
-            self.client = MexcClient(self.config)
+            # MEXC spot client
+            self.config = MexcConfig(
+                api_key=api_key,
+                api_secret=api_secret,
+            )
+            if dry_run:
+                self.client = DryRunClient(
+                    self.config,
+                    initial_usdt=initial_capital,
+                    initial_btc=0.0,
+                )
+            else:
+                self.client = MexcClient(self.config)
+
+            # Order book collector for kappa calibration
+            self.collector = OrderBookCollector()
+
+            # Market data poller
+            self.poller = MexcMarketPoller(
+                client=self.client,
+                collector=self.collector,
+                symbol=symbol,
+            )
 
         # Model (default: GLFT infinite-horizon)
         self.model: MarketMakingModel = model or GLFTModel()
@@ -124,20 +188,17 @@ class LiveTrader:
         # Fee model
         self.fee_model = fee_model or FeeModel(FeeTier.REGULAR)
 
-        # Order book collector for kappa calibration
-        self.collector = OrderBookCollector()
-
-        # Market data poller (replaces WebSocket)
-        self.poller = MexcMarketPoller(
-            client=self.client,
-            collector=self.collector,
-            symbol=symbol,
-        )
-
-        # Kappa provider (default: live calibration from collector)
-        self.kappa_provider: KappaProvider = kappa_provider or LiveKappaProvider(
-            collector=self.collector,
-        )
+        # Kappa provider (default: live calibration from collector if spot, constant if futures)
+        if use_futures:
+            # Futures mode: use constant kappa (no orderbook calibration yet)
+            from strategies.avellaneda_stoikov.kappa_provider import ConstantKappaProvider
+            self.kappa_provider: KappaProvider = kappa_provider or ConstantKappaProvider(
+                kappa=0.5, A=50.0
+            )
+        else:
+            self.kappa_provider: KappaProvider = kappa_provider or LiveKappaProvider(
+                collector=self.collector,
+            )
 
         # Order manager (for local tracking)
         self.order_manager = OrderManager(
@@ -168,12 +229,20 @@ class LiveTrader:
         # Track processed fills to avoid double-counting
         self._processed_fills: Set[str] = set()
 
-        # Safety controls
+        # Safety controls (Phase 1)
         self._price_ema: float = 0.0
         self._ema_alpha: float = 0.1
         self._tick_rejection_count: int = 0
         self._last_fill_time: float = 0.0
         self._last_valid_tick_time: float = 0.0
+
+        # Phase 2: Advanced risk controls
+        self._recent_fills: List[str] = []  # Track 'buy' or 'sell'
+        self._vol_fast_ema: float = 0.0
+        self._vol_slow_ema: float = 0.0
+
+        # Futures-specific: Position tracking
+        self.position: Optional[Dict] = None  # {'size', 'side', 'entry_price', 'liq_price'}
 
         # Threading
         self._stop_event = threading.Event()
@@ -303,12 +372,201 @@ class LiveTrader:
             return mult
         return 1.0
 
+    def _calculate_realized_volatility(self) -> float:
+        """Calculate realized volatility from recent price returns."""
+        if len(self.price_history) < VOLATILITY_LOOKBACK + 1:
+            return VOLATILITY_REFERENCE
+
+        returns = []
+        for i in range(-VOLATILITY_LOOKBACK, 0):
+            ret = (self.price_history[i] - self.price_history[i - 1]) / self.price_history[i - 1]
+            returns.append(ret)
+
+        # Standard deviation of returns
+        mean_ret = sum(returns) / len(returns)
+        variance = sum((r - mean_ret) ** 2 for r in returns) / len(returns)
+        return variance ** 0.5
+
+    def _calculate_dual_timeframe_volatility(self) -> float:
+        """Calculate max of fast/slow volatility for conservative sizing."""
+        if not DUAL_TIMEFRAME_VOL_ENABLED:
+            return self._calculate_volatility()
+
+        # Fast volatility
+        vol_fast = 0.0
+        if len(self.price_history) >= VOL_FAST_WINDOW + 1:
+            returns_fast = []
+            for i in range(-VOL_FAST_WINDOW, 0):
+                ret = (self.price_history[i] - self.price_history[i - 1]) / self.price_history[i - 1]
+                returns_fast.append(ret)
+            mean = sum(returns_fast) / len(returns_fast)
+            variance = sum((r - mean) ** 2 for r in returns_fast) / len(returns_fast)
+            vol_fast = variance ** 0.5
+
+        # Slow volatility
+        vol_slow = 0.0
+        if len(self.price_history) >= VOL_SLOW_WINDOW + 1:
+            returns_slow = []
+            for i in range(-VOL_SLOW_WINDOW, 0):
+                ret = (self.price_history[i] - self.price_history[i - 1]) / self.price_history[i - 1]
+                returns_slow.append(ret)
+            mean = sum(returns_slow) / len(returns_slow)
+            variance = sum((r - mean) ** 2 for r in returns_slow) / len(returns_slow)
+            vol_slow = variance ** 0.5
+
+        # Use max for conservative sizing (fallback to standard if neither ready)
+        if vol_fast == 0.0 and vol_slow == 0.0:
+            return self._calculate_volatility()
+        return max(vol_fast, vol_slow, self._calculate_volatility())
+
+    def _calculate_momentum(self) -> float:
+        """Calculate short-term price momentum for asymmetric spreads."""
+        if len(self.price_history) < MOMENTUM_LOOKBACK + 1:
+            return 0.0
+
+        price_now = self.price_history[-1]
+        price_ago = self.price_history[-MOMENTUM_LOOKBACK - 1]
+        return (price_now - price_ago) / price_ago
+
+    def _calculate_fill_imbalance(self) -> tuple:
+        """Calculate fill imbalance and return (imbalance_ratio, widening_side).
+
+        Returns:
+            (imbalance_ratio, widening_side):
+                - imbalance_ratio: 0.0-1.0, where 1.0 = all buys or all sells
+                - widening_side: 'buy' or 'sell' or None
+        """
+        if not FILL_IMBALANCE_ENABLED or len(self._recent_fills) < 5:
+            return 0.0, None
+
+        recent = self._recent_fills[-FILL_IMBALANCE_WINDOW:]
+        buy_count = sum(1 for side in recent if side == 'buy')
+        sell_count = sum(1 for side in recent if side == 'sell')
+        total = len(recent)
+
+        if total == 0:
+            return 0.0, None
+
+        buy_ratio = buy_count / total
+        sell_ratio = sell_count / total
+
+        if buy_ratio >= FILL_IMBALANCE_THRESHOLD:
+            return buy_ratio, 'buy'
+        elif sell_ratio >= FILL_IMBALANCE_THRESHOLD:
+            return sell_ratio, 'sell'
+        else:
+            return max(buy_ratio, sell_ratio), None
+
+    def _check_liquidation(self):
+        """Check if position is approaching liquidation and take action."""
+        if not self.use_futures:
+            return
+
+        # Check for liquidation in dry-run mode
+        if self.dry_run and hasattr(self.client, 'check_liquidation'):
+            current_price = self.state.current_price
+            if self.client.check_liquidation(current_price):
+                # Position was liquidated
+                self.position = None
+                self.state.inventory = 0.0
+                return
+
+        # Get current position
+        if self.dry_run:
+            pos_data = self.client.fetch_position(self.symbol)
+        else:
+            try:
+                pos_data = self.client.fetch_position(self.symbol)
+            except Exception as e:
+                print(f"Error fetching position: {e}")
+                return
+
+        if not pos_data:
+            self.position = None
+            return
+
+        # Update position tracking
+        current_price = self.state.current_price
+        size = float(pos_data.get('contracts', 0))
+        entry_price = float(pos_data.get('entryPrice', current_price))
+        liq_price = float(pos_data.get('liquidationPrice', 0))
+
+        if abs(size) < 1e-8:
+            self.position = None
+            return
+
+        self.position = {
+            'size': size,
+            'side': 'long' if size > 0 else 'short',
+            'entry_price': entry_price,
+            'liq_price': liq_price,
+        }
+
+        # Calculate distance to liquidation
+        if liq_price > 0:
+            if self.position['side'] == 'long':
+                distance_pct = (current_price - liq_price) / current_price
+            else:  # short
+                distance_pct = (liq_price - current_price) / current_price
+
+            # Emergency position reduction if approaching liquidation
+            if distance_pct < LIQUIDATION_THRESHOLD:
+                print(
+                    f"⚠️ APPROACHING LIQUIDATION: {distance_pct:.1%} from liq price "
+                    f"${liq_price:.2f}. Reducing position..."
+                )
+                self._emergency_reduce_position()
+
+    def _emergency_reduce_position(self):
+        """Reduce position size to avoid liquidation."""
+        if not self.position:
+            return
+
+        reduce_amount = abs(self.position['size']) * EMERGENCY_REDUCE_RATIO
+        if reduce_amount < self.order_size:
+            reduce_amount = abs(self.position['size'])  # Close entire position if too small
+
+        # Place market order to reduce position
+        try:
+            side = 'sell' if self.position['side'] == 'long' else 'buy'
+            print(f"Emergency {side} {reduce_amount:.6f} BTC at market")
+
+            if not self.dry_run:
+                self.client.place_order(
+                    symbol=self.symbol,
+                    side=side,
+                    amount=reduce_amount,
+                    order_type='market',
+                )
+            else:
+                # In dry-run, simulate immediate fill at current price
+                current_price = self.state.current_price
+                if hasattr(self.client, '_execute_fill'):
+                    order = {
+                        'side': side,
+                        'amount': reduce_amount,
+                        'price': current_price
+                    }
+                    self.client._execute_fill(order, current_price)
+
+        except Exception as e:
+            print(f"Error reducing position: {e}")
+
     def _calculate_quotes(self) -> tuple:
-        """Calculate optimal bid/ask quotes."""
+        """Calculate optimal bid/ask quotes with Phase 2 enhancements."""
         if self.state.current_price <= 0:
             return None, None
 
-        volatility = self._calculate_volatility()
+        # Phase 2: Use dual-timeframe volatility for conservative sizing
+        volatility = self._calculate_dual_timeframe_volatility()
+
+        # Phase 2: Dynamic gamma adjustment based on realized volatility
+        original_gamma = self.model.risk_aversion
+        if DYNAMIC_GAMMA_ENABLED:
+            realized_vol = self._calculate_realized_volatility()
+            gamma_mult = realized_vol / VOLATILITY_REFERENCE
+            gamma_mult = max(GAMMA_MIN_MULT, min(GAMMA_MAX_MULT, gamma_mult))
+            self.model.risk_aversion = original_gamma * gamma_mult
 
         # Time remaining (GLFT ignores this; A-S uses 24h session midpoint)
         time_remaining = 0.5
@@ -320,18 +578,62 @@ class LiveTrader:
             time_remaining=time_remaining,
         )
 
-        # Price displacement guard: widen spread during fast moves
-        mult = self._calculate_displacement_multiplier()
-        if mult > 1.0:
-            mid = (bid + ask) / 2
-            half = (ask - bid) / 2
-            half *= mult
-            bid = mid - half
-            ask = mid + half
+        # Restore original gamma for next iteration
+        self.model.risk_aversion = original_gamma
+
+        mid = (bid + ask) / 2
+        half_spread = (ask - bid) / 2
+
+        # Phase 1: Price displacement guard - widen spread during fast moves
+        disp_mult = self._calculate_displacement_multiplier()
+        if disp_mult > 1.0:
+            half_spread *= disp_mult
             print(
                 f"[{datetime.now()}] DISPLACEMENT GUARD: "
-                f"spread widened {mult:.1f}×"
+                f"spread widened {disp_mult:.1f}×"
             )
+
+        # Phase 2: Asymmetric spreads - widen unfavorable side during trends
+        if ASYMMETRIC_SPREADS_ENABLED:
+            momentum = self._calculate_momentum()
+            if abs(momentum) > MOMENTUM_THRESHOLD:
+                if momentum > 0:  # Uptrend: widen ask
+                    ask_adjustment = ASYMMETRY_AGGRESSION
+                    bid_adjustment = 1.0
+                    print(f"[{datetime.now()}] ASYMMETRIC: uptrend detected, widening ask")
+                else:  # Downtrend: widen bid
+                    ask_adjustment = 1.0
+                    bid_adjustment = ASYMMETRY_AGGRESSION
+                    print(f"[{datetime.now()}] ASYMMETRIC: downtrend detected, widening bid")
+
+                bid = mid - half_spread * bid_adjustment
+                ask = mid + half_spread * ask_adjustment
+            else:
+                bid = mid - half_spread
+                ask = mid + half_spread
+        else:
+            bid = mid - half_spread
+            ask = mid + half_spread
+
+        # Phase 2: Fill imbalance - widen side getting filled too often
+        imbalance_ratio, imbalance_side = self._calculate_fill_imbalance()
+        if imbalance_side:
+            if imbalance_side == 'buy':  # Too many buys, widen bid
+                spread_width = ask - bid
+                bid = mid - (spread_width / 2) * IMBALANCE_WIDENING
+                ask = mid + (spread_width / 2)
+                print(
+                    f"[{datetime.now()}] FILL IMBALANCE: {imbalance_ratio:.0%} buys, "
+                    f"widening bid"
+                )
+            elif imbalance_side == 'sell':  # Too many sells, widen ask
+                spread_width = ask - bid
+                bid = mid - (spread_width / 2)
+                ask = mid + (spread_width / 2) * IMBALANCE_WIDENING
+                print(
+                    f"[{datetime.now()}] FILL IMBALANCE: {imbalance_ratio:.0%} sells, "
+                    f"widening ask"
+                )
 
         return bid, ask
 
@@ -471,6 +773,13 @@ class LiveTrader:
 
                         self.state.trades_count += 1
                         self._last_fill_time = time.time()
+
+                        # Track fill side for imbalance detection
+                        fill_side = 'buy' if side.lower() in ('buy', 'b') else 'sell'
+                        self._recent_fills.append(fill_side)
+                        if len(self._recent_fills) > FILL_IMBALANCE_WINDOW * 2:
+                            self._recent_fills = self._recent_fills[-FILL_IMBALANCE_WINDOW * 2:]
+
                         print(
                             f"[{datetime.now()}] FILL: {side} {qty} "
                             f"@ ${price:.2f} (fee: ${fee:.4f}) "
@@ -504,6 +813,13 @@ class LiveTrader:
 
                         self.state.trades_count += 1
                         self._last_fill_time = time.time()
+
+                        # Track fill side for imbalance detection
+                        fill_side = 'buy' if side.lower() in ('buy', 'b') else 'sell'
+                        self._recent_fills.append(fill_side)
+                        if len(self._recent_fills) > FILL_IMBALANCE_WINDOW * 2:
+                            self._recent_fills = self._recent_fills[-FILL_IMBALANCE_WINDOW * 2:]
+
                         print(
                             f"[{datetime.now()}] FILL: {side} {qty} "
                             f"@ ${price:.2f} (fee: ${fee:.4f}) "
@@ -537,6 +853,10 @@ class LiveTrader:
                 self._update_quotes()
                 self._check_fills()
 
+                # Futures: Check liquidation
+                if self.use_futures:
+                    self._check_liquidation()
+
                 # Update P&L
                 if self.state.current_price > 0:
                     inventory_value = self.state.inventory * self.state.current_price
@@ -560,14 +880,18 @@ class LiveTrader:
         kappa_mode = type(self.kappa_provider).__name__
         mode = "DRY-RUN" if self.dry_run else "LIVE"
 
+        exchange_name = "Bybit Futures" if self.use_futures else "MEXC Spot"
+
         print("=" * 60)
         print("MARKET MAKING PAPER TRADER")
         print("=" * 60)
         print(f"Model:          {model_name}")
-        print(f"Exchange:       MEXC ({mode})")
+        print(f"Exchange:       {exchange_name} ({mode})")
         print(f"Symbol:         {self.symbol}")
         print(f"Initial Capital: ${self.initial_capital:,.2f}")
         print(f"Order Size:     {self.order_size} BTC")
+        if self.use_futures:
+            print(f"Leverage:       {self.leverage}x")
         print(f"Fee Tier:       {fee_tier} (maker: {self.fee_model.schedule.maker:.4%})")
         print(f"Kappa Mode:     {kappa_mode}")
         print(f"Regime Filter:  {'ON' if self.use_regime_filter else 'OFF'}")
@@ -594,6 +918,20 @@ class LiveTrader:
               f"inv_limit={INVENTORY_SOFT_LIMIT}/{INVENTORY_HARD_LIMIT}× | "
               f"cooldown={FILL_COOLDOWN_SECONDS}s | "
               f"disp_guard={DISPLACEMENT_THRESHOLD:.1%}")
+
+        # Phase 2 features summary
+        phase2_features = []
+        if DYNAMIC_GAMMA_ENABLED:
+            phase2_features.append("dynamic_γ")
+        if DUAL_TIMEFRAME_VOL_ENABLED:
+            phase2_features.append("dual_vol")
+        if ASYMMETRIC_SPREADS_ENABLED:
+            phase2_features.append("asym_spreads")
+        if FILL_IMBALANCE_ENABLED:
+            phase2_features.append("fill_imbal")
+        if phase2_features:
+            print(f"Phase 2:        {' | '.join(phase2_features)}")
+
         print("=" * 60)
 
         # Start quote loop (polls market data inline)

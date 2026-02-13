@@ -1,8 +1,12 @@
-"""MEXC fee model with tiered structure.
+"""Exchange fee models with tiered structure.
 
-Models the real-world fee schedule for MEXC spot trading.
+Models real-world fee schedules for:
+- MEXC spot trading
+- Bybit futures trading
 
-Reference: https://www.mexc.com/fee
+References:
+- MEXC: https://www.mexc.com/fee
+- Bybit: https://www.bybit.com/en/help-center/article/Trading-Fee-Structure
 """
 
 from dataclasses import dataclass
@@ -10,10 +14,15 @@ from enum import Enum
 
 
 class FeeTier(Enum):
-    """MEXC spot fee tiers."""
+    """Exchange fee tiers."""
 
+    # MEXC spot tiers
     REGULAR = "regular"
     MX_DEDUCTION = "mx_deduction"
+
+    # Bybit futures tiers
+    BYBIT_VIP0 = "bybit_vip0"
+    BYBIT_VIP1 = "bybit_vip1"
 
 
 @dataclass(frozen=True)
@@ -24,13 +33,21 @@ class TierSchedule:
     taker: float  # as decimal
 
 
-# MEXC spot fee schedule
+# Exchange fee schedules
 FEE_SCHEDULE: dict[FeeTier, TierSchedule] = {
+    # MEXC spot
     FeeTier.REGULAR: TierSchedule(
         maker=0.0, taker=0.0005,
     ),
     FeeTier.MX_DEDUCTION: TierSchedule(
         maker=0.0, taker=0.0004,
+    ),
+    # Bybit futures
+    FeeTier.BYBIT_VIP0: TierSchedule(
+        maker=0.0001, taker=0.0006,  # 0.01% / 0.06%
+    ),
+    FeeTier.BYBIT_VIP1: TierSchedule(
+        maker=0.0001, taker=0.0005,  # 0.01% / 0.05%
     ),
 }
 

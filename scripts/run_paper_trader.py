@@ -1,22 +1,26 @@
 #!/usr/bin/env python3
-"""Run market making paper trader on MEXC.
+"""Run market making paper trader on MEXC spot or Bybit futures.
 
 Usage:
-    python scripts/run_paper_trader.py                        # GLFT dry-run
+    python scripts/run_paper_trader.py                        # MEXC spot dry-run
+    python scripts/run_paper_trader.py --futures              # Bybit futures dry-run
+    python scripts/run_paper_trader.py --futures --leverage=50 # 50x leverage
     python scripts/run_paper_trader.py --model=as             # A-S model
-    python scripts/run_paper_trader.py --fee-tier=mx_deduction # MX token discount
-    python scripts/run_paper_trader.py --kappa=constant       # Fixed kappa
     python scripts/run_paper_trader.py --live                 # Live trading (real orders!)
 
 Environment variables:
-    MEXC_API_KEY - Your MEXC API key
+    MEXC_API_KEY - Your MEXC API key (for spot trading)
     MEXC_API_SECRET - Your MEXC API secret
 
-To get API keys:
-    1. Go to https://www.mexc.com
+    BYBIT_API_KEY - Your Bybit API key (for futures trading)
+    BYBIT_API_SECRET - Your Bybit API secret
+
+To get Bybit API keys:
+    1. Go to https://www.bybit.com
     2. Go to API Management
-    3. Create a new API key with spot trading permissions
-    4. Set environment variables or create a .env file
+    3. Create a new API key with contract trading permissions
+    4. Enable "Contract" and "Read-Write" permissions
+    5. Set environment variables or create a .env file
 """
 
 import argparse
@@ -45,6 +49,8 @@ from strategies.avellaneda_stoikov.live_trader import LiveTrader
 FEE_TIER_MAP = {
     "regular": FeeTier.REGULAR,
     "mx_deduction": FeeTier.MX_DEDUCTION,
+    "bybit_vip0": FeeTier.BYBIT_VIP0,
+    "bybit_vip1": FeeTier.BYBIT_VIP1,
 }
 
 
@@ -128,6 +134,17 @@ def parse_args():
         action="store_true",
         help="Enable live trading (real orders). Default is dry-run.",
     )
+    parser.add_argument(
+        "--futures",
+        action="store_true",
+        help="Use Bybit futures instead of MEXC spot",
+    )
+    parser.add_argument(
+        "--leverage",
+        type=int,
+        default=50,
+        help="Leverage for futures trading (1-100, default: 50)",
+    )
     return parser.parse_args()
 
 
@@ -147,32 +164,53 @@ def main():
     load_dotenv()
     args = parse_args()
 
-    api_key = os.getenv("MEXC_API_KEY")
-    api_secret = os.getenv("MEXC_API_SECRET")
+    dry_run = not args.live
 
-    if not api_key or not api_secret:
+    # Get API credentials based on exchange
+    if args.futures:
+        api_key = os.getenv("BYBIT_API_KEY")
+        api_secret = os.getenv("BYBIT_API_SECRET")
+        exchange_name = "Bybit"
+        symbol = "BTC/USDT:USDT"  # Bybit perpetual contract
+        # Auto-select Bybit fee tier if not specified
+        if args.fee_tier == "regular":
+            fee_tier = FeeTier.BYBIT_VIP0
+        else:
+            fee_tier = FEE_TIER_MAP[args.fee_tier]
+    else:
+        api_key = os.getenv("MEXC_API_KEY")
+        api_secret = os.getenv("MEXC_API_SECRET")
+        exchange_name = "MEXC"
+        symbol = "BTCUSDT"  # MEXC spot
+        fee_tier = FEE_TIER_MAP[args.fee_tier]
+
+    # Only require API keys for live trading
+    if not dry_run and (not api_key or not api_secret):
         print("=" * 60)
-        print("ERROR: Missing API credentials")
+        print(f"ERROR: Missing {exchange_name} API credentials for live trading")
         print("=" * 60)
         print()
         print("Please set environment variables:")
-        print("  export MEXC_API_KEY='your-api-key'")
-        print("  export MEXC_API_SECRET='your-api-secret'")
+        if args.futures:
+            print("  export BYBIT_API_KEY='your-api-key'")
+            print("  export BYBIT_API_SECRET='your-api-secret'")
+        else:
+            print("  export MEXC_API_KEY='your-api-key'")
+            print("  export MEXC_API_SECRET='your-api-secret'")
         print()
-        print("Or create a .env file in the project root:")
-        print("  MEXC_API_KEY=your-api-key")
-        print("  MEXC_API_SECRET=your-api-secret")
-        print()
-        print("To get API keys:")
-        print("  1. Go to https://www.mexc.com")
-        print("  2. Go to API Management")
-        print("  3. Create a new API key with spot trading permissions")
+        print(f"To get {exchange_name} API keys, see the script docstring")
         print("=" * 60)
         sys.exit(1)
 
-    dry_run = not args.live
+    # Use dummy keys for dry-run mode
+    if dry_run:
+        if not api_key:
+            api_key = "dry-run-key"
+        if not api_secret:
+            api_secret = "dry-run-secret"
+
     model = build_model(args)
-    fee_model = FeeModel(FEE_TIER_MAP[args.fee_tier])
+    fee_model = FeeModel(fee_tier)
 
     # For constant kappa, pass an explicit provider; for live mode,
     # LiveTrader creates a LiveKappaProvider backed by its internal collector
@@ -187,7 +225,7 @@ def main():
         api_key=api_key,
         api_secret=api_secret,
         dry_run=dry_run,
-        symbol="BTCUSDT",
+        symbol=symbol,
         initial_capital=args.capital,
         order_size=args.order_size,
         use_regime_filter=not args.no_regime_filter,
@@ -195,6 +233,8 @@ def main():
         model=model,
         fee_model=fee_model,
         kappa_provider=kappa_provider,
+        use_futures=args.futures,
+        leverage=args.leverage if args.futures else 1,
     )
 
     # Handle graceful shutdown
