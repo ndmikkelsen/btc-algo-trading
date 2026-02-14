@@ -166,6 +166,17 @@ class LiveTrader:
         self.use_futures = use_futures
         self.leverage = leverage
 
+        # Warn if order value is too small for exchange minimum
+        if use_futures:
+            min_notional = BYBIT_MIN_ORDER_SIZE * 100000  # ~$97 at $97k BTC
+            if self.order_value_usdt < min_notional:
+                print(
+                    f"⚠️ WARNING: Order value ${self.order_value_usdt:.2f} < "
+                    f"minimum notional ~${min_notional:.0f} "
+                    f"(Bybit min {BYBIT_MIN_ORDER_SIZE} BTC). "
+                    f"All orders will be placed at minimum size."
+                )
+
         # Create exchange client (MEXC spot or Bybit futures)
         if use_futures:
             # Bybit futures client
@@ -286,13 +297,22 @@ class LiveTrader:
 
     @property
     def order_size(self) -> float:
-        """Calculate order size in BTC from USDT value and current price.
+        """Actual order size in BTC after exchange rounding.
 
-        Returns estimated BTC quantity. Used for inventory limits and display.
-        Defaults to assuming $100k BTC if no current price available.
+        Returns the quantity that will actually be placed, accounting for
+        exchange lot size and minimum order constraints. Used for inventory
+        limits and profitability checks — must reflect reality.
         """
-        current_price = self.state.current_price if hasattr(self, 'state') and self.state.current_price > 0 else 100000.0
-        return self.order_value_usdt / current_price
+        current_price = (
+            self.state.current_price
+            if hasattr(self, 'state') and self.state.current_price > 0
+            else 100000.0
+        )
+        raw_qty = self.order_value_usdt / current_price
+        if self.use_futures:
+            rounded = math.floor(raw_qty / BYBIT_LOT_SIZE) * BYBIT_LOT_SIZE
+            return max(rounded, BYBIT_MIN_ORDER_SIZE)
+        return raw_qty
 
     def _validate_tick(self, price: float) -> bool:
         """Reject ticks deviating > BAD_TICK_THRESHOLD from running EMA."""
