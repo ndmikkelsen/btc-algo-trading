@@ -151,7 +151,7 @@ class BybitFuturesClient:
                 ticker = self.fetch_ticker(symbol)
                 conversion_price = float(ticker.get('last', 0))
             else:
-                conversion_price = price
+                conversion_price = float(price)  # Convert string price to float
             amount = self.calculate_qty_from_value(value_usdt, conversion_price)
 
         # Add postOnly for limit orders (maker-only)
@@ -411,7 +411,7 @@ class DryRunFuturesClient:
                 ticker = self.fetch_ticker(symbol)
                 conversion_price = float(ticker.get('last', 0))
             else:
-                conversion_price = price
+                conversion_price = float(price)  # Convert string price to float
             amount = self.calculate_qty_from_value(value_usdt, conversion_price)
 
         self.order_counter += 1
