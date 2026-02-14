@@ -939,13 +939,10 @@ class LiveTrader:
 
     def _quote_loop(self):
         """Main loop for updating quotes."""
-        print("[DEBUG] Quote loop started")
+        print(f"{Colors.MAGENTA}▶ Quote loop started{Colors.RESET}")
         while not self._stop_event.is_set():
             try:
-                # Poll market data (replaces WebSocket)
-                print("[DEBUG] Polling market data...")
                 self._poll_market_data()
-                print("[DEBUG] Market data polled successfully")
 
                 # Stale data protection: pull quotes if no valid tick
                 if (
@@ -955,8 +952,8 @@ class LiveTrader:
                     if self.state.bid_order_id or self.state.ask_order_id:
                         self._cancel_all_orders()
                         print(
-                            f"[{datetime.now()}] STALE DATA — "
-                            f"orders pulled (no valid tick for 15s)"
+                            f"{Colors.YELLOW}⚠️ [{datetime.now().strftime('%H:%M:%S')}] STALE DATA — "
+                            f"orders pulled (no valid tick for 15s){Colors.RESET}"
                         )
                     self._stop_event.wait(self.quote_interval)
                     continue
@@ -976,14 +973,14 @@ class LiveTrader:
                     )
 
             except Exception as e:
-                print(f"[DEBUG] Exception in quote loop: {e}")
+                print(f"{Colors.RED}❌ [{datetime.now().strftime('%H:%M:%S')}] Loop error: {e}{Colors.RESET}")
                 import traceback
                 traceback.print_exc()
                 self.state.errors.append(f"Loop error: {e}")
 
             self._stop_event.wait(self.quote_interval)
 
-        print("[DEBUG] Quote loop exited")
+        print(f"{Colors.MAGENTA}⏹ Quote loop stopped{Colors.RESET}")
 
     def start(self):
         """Start the trader."""
