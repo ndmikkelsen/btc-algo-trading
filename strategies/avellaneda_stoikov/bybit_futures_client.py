@@ -375,7 +375,7 @@ class DryRunFuturesClient:
 
         return {
             'symbol': symbol,
-            'contracts': self.position['size'],
+            'contracts': abs(self.position['size']),  # Always unsigned like ccxt
             'side': self.position['side'],
             'entryPrice': self.position['entry_price'],
             'liquidationPrice': self.position.get('liq_price'),

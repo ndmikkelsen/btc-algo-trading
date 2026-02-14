@@ -513,9 +513,16 @@ class LiveTrader:
             self.state.inventory = 0.0
             return
 
+        # Read actual position side from ccxt (contracts is always unsigned)
+        side = pos_data.get('side', 'long')
+
+        # Make size signed: negative for short positions
+        if side == 'short':
+            size = -size
+
         self.position = {
             'size': size,
-            'side': 'long' if size > 0 else 'short',
+            'side': side,
             'entry_price': entry_price,
             'liq_price': liq_price,
         }

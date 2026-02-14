@@ -90,6 +90,11 @@ def parse_args():
         help="Order size in BTC (default: 0.003)",
     )
     parser.add_argument(
+        "--order-value",
+        type=float,
+        help="Order value in USDT (e.g., 20.0 for $20 orders). Overrides --order-size.",
+    )
+    parser.add_argument(
         "--interval",
         type=float,
         default=5.0,
@@ -145,6 +150,11 @@ def parse_args():
         type=int,
         default=50,
         help="Leverage for futures trading (1-100, default: 50)",
+    )
+    parser.add_argument(
+        "--tui",
+        action="store_true",
+        help="Enable live TUI dashboard (real-time stats)",
     )
     return parser.parse_args()
 
@@ -229,6 +239,7 @@ def main():
         symbol=symbol,
         initial_capital=args.capital,
         order_size=args.order_size,
+        order_value_usdt=args.order_value,
         use_regime_filter=not args.no_regime_filter,
         quote_interval=args.interval,
         model=model,
@@ -251,9 +262,14 @@ def main():
     try:
         trader.start()
 
-        # Keep running until interrupted
-        while trader.state.is_running:
-            time.sleep(1)  # More reliable than signal.pause()
+        # Use TUI dashboard if requested
+        if args.tui:
+            from strategies.avellaneda_stoikov.tui_dashboard import run_dashboard
+            run_dashboard(trader, refresh_rate=1.0)
+        else:
+            # Keep running until interrupted
+            while trader.state.is_running:
+                time.sleep(1)  # More reliable than signal.pause()
 
     except KeyboardInterrupt:
         trader.stop()

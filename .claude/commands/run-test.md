@@ -37,6 +37,7 @@ Extract flags from the user's command. All flags are optional with smart default
 | `--kappa-value` | `0.5` | κ value when `--kappa=constant` (1/$ units) |
 | `--arrival-rate` | `20.0` | Arrival rate A for constant kappa mode |
 | `--order-size` | `0.003` | Order size in BTC |
+| `--order-value` | none | Order value in USDT (e.g., 20.0). Overrides --order-size. |
 | `--interval` | `5.0` | Quote update interval (seconds) |
 | `--min-spread` | `5.0` | Minimum spread in dollars |
 | `--max-spread` | `100.0` | Maximum spread in dollars |
