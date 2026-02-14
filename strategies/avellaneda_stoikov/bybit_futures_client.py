@@ -154,6 +154,11 @@ class BybitFuturesClient:
                 conversion_price = float(price)  # Convert string price to float
             amount = self.calculate_qty_from_value(value_usdt, conversion_price)
 
+        # Ensure amount meets minimum and is rounded to lot size
+        amount = math.floor(amount / 0.001) * 0.001
+        if amount < 0.001:
+            raise ValueError(f"Order amount {amount} BTC below Bybit minimum 0.001 BTC")
+
         # Add postOnly for limit orders (maker-only)
         if order_type == 'limit':
             order_params['postOnly'] = True

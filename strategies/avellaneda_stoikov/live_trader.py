@@ -13,6 +13,7 @@ Trading modes:
 - dry_run=False: real order placement via exchange REST API
 """
 
+import math
 import os
 import time
 import threading
@@ -79,6 +80,8 @@ from strategies.avellaneda_stoikov.config import (
     LEVERAGE,
     LIQUIDATION_THRESHOLD,
     EMERGENCY_REDUCE_RATIO,
+    BYBIT_MIN_ORDER_SIZE,
+    BYBIT_LOT_SIZE,
 )
 
 
@@ -576,16 +579,16 @@ class LiveTrader:
         if not self.position:
             return
 
-        # Bybit minimum order size for BTC futures
-        BYBIT_MIN_ORDER_SIZE = 0.001
-
         reduce_amount = abs(self.position['size']) * EMERGENCY_REDUCE_RATIO
+
+        # Round down to exchange lot size
+        reduce_amount = math.floor(reduce_amount / BYBIT_LOT_SIZE) * BYBIT_LOT_SIZE
 
         # If reduce_amount is below minimum, try to close entire position
         if reduce_amount < BYBIT_MIN_ORDER_SIZE:
-            reduce_amount = abs(self.position['size'])
+            reduce_amount = math.floor(abs(self.position['size']) / BYBIT_LOT_SIZE) * BYBIT_LOT_SIZE
 
-        # If position is still below minimum (shouldn't happen in practice), skip
+        # If position is still below minimum, skip
         if reduce_amount < BYBIT_MIN_ORDER_SIZE:
             print(
                 f"⚠️ Position too small to reduce ({reduce_amount:.6f} < {BYBIT_MIN_ORDER_SIZE} min). "
