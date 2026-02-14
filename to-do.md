@@ -12,13 +12,13 @@ kanban-plugin: board
 
 - [ ] Tune A-S parameters from paper trading results #p2
   > Adjust Avellaneda-Stoikov parameters based on paper trading observations.
-  >
+  > 
   > ## Parameters to Evaluate
   > - Risk aversion (γ) - currently 0.1
-  > - Volatility window - currently 20 candles
+  > - Volatility window - currently 20 candles  
   > - MIN_SPREAD - currently 0.4% (optimized config)
   > - ADX threshold - currently 25 for regime filter
-  >
+  > 
   > ## Goals
   > - Improve fill rate while maintaining profitability
   > - Reduce inventory risk exposure
@@ -28,7 +28,7 @@ kanban-plugin: board
 
 - [ ] Prepare for live trading deployment #p1
   > Set up infrastructure for real money trading on Bybit mainnet.
-  >
+  > 
   > ## Checklist
   > - [ ] Create Bybit mainnet API keys (read + trade permissions)
   > - [ ] Configure mainnet credentials securely (env vars, not in code)
@@ -36,7 +36,7 @@ kanban-plugin: board
   > - [ ] Implement kill switch / emergency stop
   > - [ ] Set up monitoring and alerting
   > - [ ] Document risk limits and stop-loss rules
-  >
+  > 
   > ## Risk Management
   > - Max position size limits
   > - Daily loss limits
@@ -44,17 +44,19 @@ kanban-plugin: board
 
 ## High Priority - #p0
 
+
+
 ## In Progress
 
 - [ ] Run A-S paper trading on Bybit testnet #p1
   > Validate Avellaneda-Stoikov strategy in live market conditions using Bybit testnet paper trading.
-  >
+  > 
   > ## Acceptance Criteria
   > - Run paper trader for minimum 1 week
   > - Monitor fill rates, spread capture, and inventory management
   > - Track P&L vs backtest expectations
   > - Identify any issues with live execution (latency, WebSocket stability)
-  >
+  > 
   > ## Resources
   > - scripts/run_paper_trader.py
   > - strategies/avellaneda_stoikov/live_trader.py
@@ -78,10 +80,10 @@ kanban-plugin: board
 - [x] Optimize BTCMomentumScalper strategy parameters #p2
 - [x] Update PLAN.md with completed A-S milestones #p2
   > PLAN.md still shows M1-M4 milestones as unchecked, but all are implemented.
-  >
+  > 
   > ## Updates Needed
   > - Mark M1 (Core Model) as complete
-  > - Mark M2 (Order Management) as complete
+  > - Mark M2 (Order Management) as complete  
   > - Mark M3 (Backtesting Framework) as complete
   > - Mark M4 (Parameter Optimization) as complete
   > - Add M5: Paper Trading Validation
