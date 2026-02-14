@@ -82,6 +82,18 @@ from strategies.avellaneda_stoikov.config import (
 )
 
 
+# ANSI color codes for terminal output
+class Colors:
+    """Terminal color codes for better log visibility."""
+    GREEN = '\033[92m'      # Buys, positive events
+    RED = '\033[91m'        # Sells, errors
+    YELLOW = '\033[93m'     # Warnings
+    CYAN = '\033[96m'       # Info, quotes
+    MAGENTA = '\033[95m'    # System events
+    BOLD = '\033[1m'        # Bold text
+    RESET = '\033[0m'       # Reset to default
+
+
 @dataclass
 class TraderState:
     """Current state of the trader."""
@@ -774,13 +786,13 @@ class LiveTrader:
 
             spread_bps = (ask - bid) / self.state.current_price * 10000
             print(
-                f"[{datetime.now()}] Quotes updated: "
-                f"Bid ${bid:.2f} | Ask ${ask:.2f} | Spread {spread_bps:.1f}bps"
+                f"{Colors.CYAN}📊 [{datetime.now().strftime('%H:%M:%S')}] Quotes updated: "
+                f"Bid ${bid:.2f} | Ask ${ask:.2f} | Spread {spread_bps:.1f}bps{Colors.RESET}"
             )
 
         except Exception as e:
             self.state.errors.append(f"Quote update error: {e}")
-            print(f"Quote update error: {e}")
+            print(f"{Colors.RED}❌ Quote update error: {e}{Colors.RESET}")
 
     def _cancel_all_orders(self):
         """Cancel all open orders."""
@@ -797,6 +809,15 @@ class LiveTrader:
             if self.dry_run:
                 # In dry-run mode, use simulated fill checking
                 fills = self.client.check_fills(self.state.current_price)
+
+                # Verbose: log fill check attempts
+                if not fills and self.state.trades_count == 0:
+                    # Only log this occasionally to avoid spam
+                    if int(time.time()) % 30 == 0:  # Every 30 seconds
+                        print(f"{Colors.CYAN}[{datetime.now().strftime('%H:%M:%S')}] Checking fills... "
+                              f"(Bid: ${self.state.bid_price:.2f} | Market: ${self.state.current_price:.2f} | "
+                              f"Ask: ${self.state.ask_price:.2f}){Colors.RESET}")
+
                 for fill in fills:
                     order_id = fill.get("orderId")
                     if order_id and order_id not in self._processed_fills:
@@ -825,10 +846,13 @@ class LiveTrader:
                         if len(self._recent_fills) > FILL_IMBALANCE_WINDOW * 2:
                             self._recent_fills = self._recent_fills[-FILL_IMBALANCE_WINDOW * 2:]
 
+                        # Color-coded fill logging
+                        color = Colors.GREEN if fill_side == 'buy' else Colors.RED
+                        emoji = "🟢" if fill_side == 'buy' else "🔴"
                         print(
-                            f"[{datetime.now()}] FILL: {side} {qty} "
-                            f"@ ${price:.2f} (fee: ${fee:.4f}) "
-                            f"[inv: {self.state.inventory:.6f}]"
+                            f"{color}{Colors.BOLD}{emoji} [{datetime.now().strftime('%H:%M:%S')}] FILL: {side.upper()} "
+                            f"{qty:.6f} BTC @ ${price:.2f} | Fee: ${fee:.4f} | "
+                            f"Inventory: {self.state.inventory:+.6f} BTC{Colors.RESET}"
                         )
             else:
                 # In live mode, check order history
@@ -865,10 +889,13 @@ class LiveTrader:
                         if len(self._recent_fills) > FILL_IMBALANCE_WINDOW * 2:
                             self._recent_fills = self._recent_fills[-FILL_IMBALANCE_WINDOW * 2:]
 
+                        # Color-coded fill logging
+                        color = Colors.GREEN if fill_side == 'buy' else Colors.RED
+                        emoji = "🟢" if fill_side == 'buy' else "🔴"
                         print(
-                            f"[{datetime.now()}] FILL: {side} {qty} "
-                            f"@ ${price:.2f} (fee: ${fee:.4f}) "
-                            f"[inv: {self.state.inventory:.6f}]"
+                            f"{color}{Colors.BOLD}{emoji} [{datetime.now().strftime('%H:%M:%S')}] FILL: {side.upper()} "
+                            f"{qty:.6f} BTC @ ${price:.2f} | Fee: ${fee:.4f} | "
+                            f"Inventory: {self.state.inventory:+.6f} BTC{Colors.RESET}"
                         )
 
         except Exception as e:
