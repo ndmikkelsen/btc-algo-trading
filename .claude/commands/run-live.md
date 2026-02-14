@@ -38,8 +38,7 @@ Extract flags from the user's command. All flags are optional with smart default
 | `--kappa` | `constant` | Kappa mode: `constant` (Bybit futures) or `live` |
 | `--kappa-value` | `0.5` | κ value when `--kappa=constant` (1/$ units) |
 | `--arrival-rate` | `50.0` | Arrival rate A for constant kappa mode |
-| `--order-size` | `0.001` | Order size in BTC (min 0.001 for Bybit) |
-| `--order-value` | none | Order value in USDT (e.g., 20.0). Overrides --order-size. |
+| `--order-pct` | `4.0` | Order size as % of capital (e.g., 4.0 = 4%) |
 | `--interval` | `5.0` | Quote update interval (seconds) |
 | `--min-spread` | `5.0` | Minimum spread in dollars |
 | `--max-spread` | `100.0` | Maximum spread in dollars |

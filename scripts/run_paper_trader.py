@@ -84,15 +84,10 @@ def parse_args():
         help="Initial capital in USDT (default: 1000)",
     )
     parser.add_argument(
-        "--order-size",
+        "--order-pct",
         type=float,
-        default=0.003,
-        help="Order size in BTC (default: 0.003)",
-    )
-    parser.add_argument(
-        "--order-value",
-        type=float,
-        help="Order value in USDT (e.g., 20.0 for $20 orders). Overrides --order-size.",
+        default=4.0,
+        help="Order size as percentage of capital (default: 4.0 = 4%%)",
     )
     parser.add_argument(
         "--interval",
@@ -231,6 +226,9 @@ def main():
         else None
     )
 
+    # Calculate order value from percentage of capital
+    order_value_usdt = args.capital * (args.order_pct / 100.0)
+
     # Create trader
     trader = LiveTrader(
         api_key=api_key,
@@ -238,8 +236,8 @@ def main():
         dry_run=dry_run,
         symbol=symbol,
         initial_capital=args.capital,
-        order_size=args.order_size,
-        order_value_usdt=args.order_value,
+        order_value_usdt=order_value_usdt,
+        order_pct=args.order_pct,
         use_regime_filter=not args.no_regime_filter,
         quote_interval=args.interval,
         model=model,

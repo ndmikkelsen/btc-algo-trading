@@ -126,7 +126,7 @@ class LiveTrader:
         dry_run: bool = True,
         symbol: str = "BTCUSDT",
         initial_capital: float = INITIAL_CAPITAL,
-        order_size: float = ORDER_SIZE,
+        order_pct: float = 4.0,
         use_regime_filter: bool = USE_REGIME_FILTER,
         quote_interval: float = 5.0,
         model: Optional[MarketMakingModel] = None,
@@ -138,8 +138,13 @@ class LiveTrader:
     ):
         self.symbol = symbol
         self.initial_capital = initial_capital
-        self.order_size = order_size
-        self.order_value_usdt = order_value_usdt
+        self.order_pct = order_pct
+
+        # Calculate order value from percentage if not explicitly provided
+        if order_value_usdt is None:
+            self.order_value_usdt = initial_capital * (order_pct / 100.0)
+        else:
+            self.order_value_usdt = order_value_usdt
         self.use_regime_filter = use_regime_filter
         self.quote_interval = quote_interval
         self.dry_run = dry_run
@@ -216,9 +221,10 @@ class LiveTrader:
             )
 
         # Order manager (for local tracking)
+        # Use USDT-based max inventory (10x order value)
         self.order_manager = OrderManager(
             initial_cash=initial_capital,
-            max_inventory=order_size * 10,
+            max_inventory=self.order_value_usdt * 10 / 100000.0,  # Estimate in BTC at ~$100k
             maker_fee=self.fee_model.schedule.maker,
         )
 
@@ -262,6 +268,16 @@ class LiveTrader:
         # Threading
         self._stop_event = threading.Event()
         self._quote_thread: Optional[threading.Thread] = None
+
+    @property
+    def order_size(self) -> float:
+        """Calculate order size in BTC from USDT value and current price.
+
+        Returns estimated BTC quantity. Used for inventory limits and display.
+        Defaults to assuming $100k BTC if no current price available.
+        """
+        current_price = self.state.current_price if hasattr(self, 'state') and self.state.current_price > 0 else 100000.0
+        return self.order_value_usdt / current_price
 
     def _validate_tick(self, price: float) -> bool:
         """Reject ticks deviating > BAD_TICK_THRESHOLD from running EMA."""
@@ -720,11 +736,8 @@ class LiveTrader:
             # Cancel existing orders
             self._cancel_all_orders()
 
-            # Build order kwargs: use value_usdt if configured (futures only), else qty
-            if self.order_value_usdt is not None and self.use_futures:
-                order_kwargs = {'value_usdt': self.order_value_usdt}
-            else:
-                order_kwargs = {'qty': str(self.order_size)}
+            # Build order kwargs: always use value_usdt (calculated from order_pct)
+            order_kwargs = {'value_usdt': self.order_value_usdt}
 
             # Place new LIMIT_MAKER orders (respect inventory limits)
             if not skip_buy:
@@ -929,10 +942,8 @@ class LiveTrader:
         print(f"Exchange:       {exchange_name} ({mode})")
         print(f"Symbol:         {self.symbol}")
         print(f"Initial Capital: ${self.initial_capital:,.2f}")
-        if self.order_value_usdt is not None:
-            print(f"Order Value:    ${self.order_value_usdt:,.2f} USDT (auto-sized)")
-        else:
-            print(f"Order Size:     {self.order_size} BTC")
+        print(f"Order Pct:      {self.order_pct}% of capital")
+        print(f"Order Value:    ${self.order_value_usdt:,.2f} USDT per order")
         if self.use_futures:
             print(f"Leverage:       {self.leverage}x")
         print(f"Fee Tier:       {fee_tier} (maker: {self.fee_model.schedule.maker:.4%})")
