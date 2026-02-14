@@ -576,9 +576,22 @@ class LiveTrader:
         if not self.position:
             return
 
+        # Bybit minimum order size for BTC futures
+        BYBIT_MIN_ORDER_SIZE = 0.001
+
         reduce_amount = abs(self.position['size']) * EMERGENCY_REDUCE_RATIO
-        if reduce_amount < self.order_size:
-            reduce_amount = abs(self.position['size'])  # Close entire position if too small
+
+        # If reduce_amount is below minimum, try to close entire position
+        if reduce_amount < BYBIT_MIN_ORDER_SIZE:
+            reduce_amount = abs(self.position['size'])
+
+        # If position is still below minimum (shouldn't happen in practice), skip
+        if reduce_amount < BYBIT_MIN_ORDER_SIZE:
+            print(
+                f"⚠️ Position too small to reduce ({reduce_amount:.6f} < {BYBIT_MIN_ORDER_SIZE} min). "
+                f"Manual intervention required."
+            )
+            return
 
         # Place market order to reduce position
         try:
