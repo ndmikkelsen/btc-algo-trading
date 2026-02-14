@@ -13,6 +13,7 @@ Trading modes:
 - dry_run=False: real order placement via exchange REST API
 """
 
+import math
 import os
 import time
 import threading
@@ -79,6 +80,8 @@ from strategies.avellaneda_stoikov.config import (
     LEVERAGE,
     LIQUIDATION_THRESHOLD,
     EMERGENCY_REDUCE_RATIO,
+    BYBIT_MIN_ORDER_SIZE,
+    BYBIT_LOT_SIZE,
 )
 
 
@@ -162,6 +165,17 @@ class LiveTrader:
         self.dry_run = dry_run
         self.use_futures = use_futures
         self.leverage = leverage
+
+        # Warn if order value is too small for exchange minimum
+        if use_futures:
+            min_notional = BYBIT_MIN_ORDER_SIZE * 100000  # ~$97 at $97k BTC
+            if self.order_value_usdt < min_notional:
+                print(
+                    f"⚠️ WARNING: Order value ${self.order_value_usdt:.2f} < "
+                    f"minimum notional ~${min_notional:.0f} "
+                    f"(Bybit min {BYBIT_MIN_ORDER_SIZE} BTC). "
+                    f"All orders will be placed at minimum size."
+                )
 
         # Create exchange client (MEXC spot or Bybit futures)
         if use_futures:
@@ -283,13 +297,22 @@ class LiveTrader:
 
     @property
     def order_size(self) -> float:
-        """Calculate order size in BTC from USDT value and current price.
+        """Actual order size in BTC after exchange rounding.
 
-        Returns estimated BTC quantity. Used for inventory limits and display.
-        Defaults to assuming $100k BTC if no current price available.
+        Returns the quantity that will actually be placed, accounting for
+        exchange lot size and minimum order constraints. Used for inventory
+        limits and profitability checks — must reflect reality.
         """
-        current_price = self.state.current_price if hasattr(self, 'state') and self.state.current_price > 0 else 100000.0
-        return self.order_value_usdt / current_price
+        current_price = (
+            self.state.current_price
+            if hasattr(self, 'state') and self.state.current_price > 0
+            else 100000.0
+        )
+        raw_qty = self.order_value_usdt / current_price
+        if self.use_futures:
+            rounded = math.floor(raw_qty / BYBIT_LOT_SIZE) * BYBIT_LOT_SIZE
+            return max(rounded, BYBIT_MIN_ORDER_SIZE)
+        return raw_qty
 
     def _validate_tick(self, price: float) -> bool:
         """Reject ticks deviating > BAD_TICK_THRESHOLD from running EMA."""
@@ -577,8 +600,21 @@ class LiveTrader:
             return
 
         reduce_amount = abs(self.position['size']) * EMERGENCY_REDUCE_RATIO
-        if reduce_amount < self.order_size:
-            reduce_amount = abs(self.position['size'])  # Close entire position if too small
+
+        # Round down to exchange lot size
+        reduce_amount = math.floor(reduce_amount / BYBIT_LOT_SIZE) * BYBIT_LOT_SIZE
+
+        # If reduce_amount is below minimum, try to close entire position
+        if reduce_amount < BYBIT_MIN_ORDER_SIZE:
+            reduce_amount = math.floor(abs(self.position['size']) / BYBIT_LOT_SIZE) * BYBIT_LOT_SIZE
+
+        # If position is still below minimum, skip
+        if reduce_amount < BYBIT_MIN_ORDER_SIZE:
+            print(
+                f"⚠️ Position too small to reduce ({reduce_amount:.6f} < {BYBIT_MIN_ORDER_SIZE} min). "
+                f"Manual intervention required."
+            )
+            return
 
         # Place market order to reduce position
         try:
@@ -903,13 +939,10 @@ class LiveTrader:
 
     def _quote_loop(self):
         """Main loop for updating quotes."""
-        print("[DEBUG] Quote loop started")
+        print(f"{Colors.MAGENTA}▶ Quote loop started{Colors.RESET}")
         while not self._stop_event.is_set():
             try:
-                # Poll market data (replaces WebSocket)
-                print("[DEBUG] Polling market data...")
                 self._poll_market_data()
-                print("[DEBUG] Market data polled successfully")
 
                 # Stale data protection: pull quotes if no valid tick
                 if (
@@ -919,8 +952,8 @@ class LiveTrader:
                     if self.state.bid_order_id or self.state.ask_order_id:
                         self._cancel_all_orders()
                         print(
-                            f"[{datetime.now()}] STALE DATA — "
-                            f"orders pulled (no valid tick for 15s)"
+                            f"{Colors.YELLOW}⚠️ [{datetime.now().strftime('%H:%M:%S')}] STALE DATA — "
+                            f"orders pulled (no valid tick for 15s){Colors.RESET}"
                         )
                     self._stop_event.wait(self.quote_interval)
                     continue
@@ -940,14 +973,14 @@ class LiveTrader:
                     )
 
             except Exception as e:
-                print(f"[DEBUG] Exception in quote loop: {e}")
+                print(f"{Colors.RED}❌ [{datetime.now().strftime('%H:%M:%S')}] Loop error: {e}{Colors.RESET}")
                 import traceback
                 traceback.print_exc()
                 self.state.errors.append(f"Loop error: {e}")
 
             self._stop_event.wait(self.quote_interval)
 
-        print("[DEBUG] Quote loop exited")
+        print(f"{Colors.MAGENTA}⏹ Quote loop stopped{Colors.RESET}")
 
     def start(self):
         """Start the trader."""

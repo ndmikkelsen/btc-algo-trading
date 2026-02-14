@@ -190,3 +190,7 @@ EMERGENCY_REDUCE_RATIO = 0.5  # Reduce position by 50% when approaching liquidat
 
 # Bybit futures symbol
 FUTURES_SYMBOL = 'BTC/USDT:USDT'  # Bybit perpetual contract symbol
+
+# Exchange-specific constraints
+BYBIT_MIN_ORDER_SIZE = 0.001   # Minimum order quantity in BTC
+BYBIT_LOT_SIZE = 0.001         # Order quantity increment in BTC

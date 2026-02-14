@@ -28,6 +28,7 @@ import os
 import sys
 import signal
 import time
+from datetime import datetime
 
 from dotenv import load_dotenv
 
@@ -165,6 +166,53 @@ def build_model(args):
     return AvellanedaStoikov()
 
 
+class TeeStream:
+    """Write to both a file and the original stream (stdout/stderr)."""
+
+    def __init__(self, stream, log_file):
+        self.stream = stream
+        self.log_file = log_file
+
+    def write(self, data):
+        self.stream.write(data)
+        self.log_file.write(data)
+        self.log_file.flush()
+
+    def flush(self):
+        self.stream.flush()
+        self.log_file.flush()
+
+    def fileno(self):
+        return self.stream.fileno()
+
+    def isatty(self):
+        return self.stream.isatty()
+
+
+def setup_logging(mode: str, symbol: str) -> str:
+    """Set up automatic file logging alongside stdout.
+
+    Creates a timestamped log file in the project's logs/ directory.
+    All stdout and stderr are tee'd to both the terminal and the file.
+
+    Returns the log file path.
+    """
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    log_dir = os.path.join(project_root, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    safe_symbol = symbol.replace("/", "-").replace(":", "-")
+    log_filename = f"{mode}-{safe_symbol}-{timestamp}.log"
+    log_path = os.path.join(log_dir, log_filename)
+
+    log_file = open(log_path, "a")
+    sys.stdout = TeeStream(sys.__stdout__, log_file)
+    sys.stderr = TeeStream(sys.__stderr__, log_file)
+
+    return log_path
+
+
 def main():
     """Run the paper trader."""
     load_dotenv()
@@ -214,6 +262,11 @@ def main():
             api_key = "dry-run-key"
         if not api_secret:
             api_secret = "dry-run-secret"
+
+    # Set up automatic file logging (tee to both terminal and log file)
+    mode = "live" if not dry_run else "dry-run"
+    log_path = setup_logging(mode, symbol)
+    print(f"📝 Logging to: {log_path}")
 
     model = build_model(args)
     fee_model = FeeModel(fee_tier)
