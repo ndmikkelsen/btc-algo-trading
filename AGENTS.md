@@ -155,6 +155,60 @@ Claude agent teams MUST follow these conventions:
 | Unit tests | `tests/unit/<module>/test_*.py` | pytest |
 | Integration tests | `tests/integration/test_*.py` | pytest |
 
+## Development Workflow
+
+### BDD/TDD Pipeline (MANDATORY for features)
+
+All new features follow this pipeline:
+
+```
+beads epic/task
+    ↓  /creating-features-from-tasks
+.feature file (Gherkin scenarios)
+    ↓  /planning-features
+.plan.md (implementation plan)
+    ↓  /creating-tasks-from-plans
+beads tasks (with dependencies)
+    ↓  /implementing-with-tdd
+test_*.py + production code (red-green-refactor)
+```
+
+### Red-Green-Refactor Protocol
+
+| Phase | Action | Verification |
+|-------|--------|-------------|
+| RED | Write failing test | `pytest` fails for the right reason |
+| GREEN | Write minimal code to pass | `pytest` passes |
+| REFACTOR | Improve code quality | `pytest` still passes |
+
+### AI Skills for BDD
+
+| Skill | Purpose | Trigger |
+|-------|---------|---------|
+| `/creating-features-from-tasks` | Create `.feature` from beads task | "create feature file", "write scenarios" |
+| `/planning-features` | Create `.plan.md` from `.feature` | "plan this feature" |
+| `/planning-from-tasks` | Create `.plan.md` from beads epic (no BDD) | "plan this epic" |
+| `/creating-tasks-from-plans` | Create beads tasks from `.plan.md` | "create tasks from plan" |
+| `/implementing-with-tdd` | TDD implementation of beads tasks | "implement this task", "TDD this" |
+
+### Agent Conventions
+
+Claude agent teams MUST follow these conventions:
+
+1. **Use beads for ALL task tracking** - `bd create`, `bd update`, `bd close`
+2. **Use cognee for knowledge queries** - `/query` before planning, after discovering patterns
+3. **BDD for features** - All features start with `.feature` files
+4. **TDD for implementation** - Red-green-refactor, no exceptions
+5. **Complete sessions with /land** - Never skip the landing protocol
+
+### Test File Locations
+
+| Type | Location | Framework |
+|------|----------|-----------|
+| BDD feature tests | `features/<domain>/test_*.py` | pytest-bdd |
+| Unit tests | `tests/unit/<module>/test_*.py` | pytest |
+| Integration tests | `tests/integration/test_*.py` | pytest |
+
 ## Quick Commands
 
 ### Beads (Issue Tracking)
