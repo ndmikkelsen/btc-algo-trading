@@ -48,7 +48,7 @@ btc-algo-trading/
 ├── config/            # Freqtrade config
 │
 ├── .claude/           # AI workflows
-│   ├── commands/      # /land, /query
+│   ├── commands/      # /land, /query, /run-test, /run-live, /stop
 │   └── scripts/       # Automation
 │
 ├── .rules/            # Technical docs
@@ -63,10 +63,12 @@ bd ready                              # Find work
 bd create "Title" -t task -p 1        # Create issue
 bd close <id> --reason "Done"         # Complete work
 
-# Freqtrade
-freqtrade download-data ...           # Get historical data
-freqtrade backtesting ...             # Run backtest
-freqtrade trade --dry-run             # Paper trading
+# Market making (recommended workflow: test first, then go live)
+/run-test                             # Paper trade with real market data
+/run-test --gamma 0.001 --interval 3  # Custom params
+/run-live                             # Live trading (requires confirmation)
+/run-live --dry-run                   # Override to paper trade mode
+/stop                                 # Gracefully stop any running trader
 
 # Cognee integration
 .claude/scripts/cognee-local.sh up    # Start Cognee

@@ -82,6 +82,18 @@ from strategies.avellaneda_stoikov.config import (
 )
 
 
+# ANSI color codes for terminal output
+class Colors:
+    """Terminal color codes for better log visibility."""
+    GREEN = '\033[92m'      # Buys, positive events
+    RED = '\033[91m'        # Sells, errors
+    YELLOW = '\033[93m'     # Warnings
+    CYAN = '\033[96m'       # Info, quotes
+    MAGENTA = '\033[95m'    # System events
+    BOLD = '\033[1m'        # Bold text
+    RESET = '\033[0m'       # Reset to default
+
+
 @dataclass
 class TraderState:
     """Current state of the trader."""
@@ -126,7 +138,7 @@ class LiveTrader:
         dry_run: bool = True,
         symbol: str = "BTCUSDT",
         initial_capital: float = INITIAL_CAPITAL,
-        order_size: float = ORDER_SIZE,
+        order_pct: float = 4.0,
         use_regime_filter: bool = USE_REGIME_FILTER,
         quote_interval: float = 5.0,
         model: Optional[MarketMakingModel] = None,
@@ -134,10 +146,17 @@ class LiveTrader:
         kappa_provider: Optional[KappaProvider] = None,
         use_futures: bool = USE_FUTURES,
         leverage: int = LEVERAGE,
+        order_value_usdt: Optional[float] = None,
     ):
         self.symbol = symbol
         self.initial_capital = initial_capital
-        self.order_size = order_size
+        self.order_pct = order_pct
+
+        # Calculate order value from percentage if not explicitly provided
+        if order_value_usdt is None:
+            self.order_value_usdt = initial_capital * (order_pct / 100.0)
+        else:
+            self.order_value_usdt = order_value_usdt
         self.use_regime_filter = use_regime_filter
         self.quote_interval = quote_interval
         self.dry_run = dry_run
@@ -214,9 +233,10 @@ class LiveTrader:
             )
 
         # Order manager (for local tracking)
+        # Use USDT-based max inventory (10x order value)
         self.order_manager = OrderManager(
             initial_cash=initial_capital,
-            max_inventory=order_size * 10,
+            max_inventory=self.order_value_usdt * 10 / 100000.0,  # Estimate in BTC at ~$100k
             maker_fee=self.fee_model.schedule.maker,
         )
 
@@ -260,6 +280,16 @@ class LiveTrader:
         # Threading
         self._stop_event = threading.Event()
         self._quote_thread: Optional[threading.Thread] = None
+
+    @property
+    def order_size(self) -> float:
+        """Calculate order size in BTC from USDT value and current price.
+
+        Returns estimated BTC quantity. Used for inventory limits and display.
+        Defaults to assuming $100k BTC if no current price available.
+        """
+        current_price = self.state.current_price if hasattr(self, 'state') and self.state.current_price > 0 else 100000.0
+        return self.order_value_usdt / current_price
 
     def _validate_tick(self, price: float) -> bool:
         """Reject ticks deviating > BAD_TICK_THRESHOLD from running EMA."""
@@ -508,14 +538,23 @@ class LiveTrader:
 
         if abs(size) < 1e-8:
             self.position = None
+            self.state.inventory = 0.0
             return
+
+        # Read actual position side from ccxt (contracts is always unsigned)
+        side = pos_data.get('side', 'long')
+
+        # Make size signed: negative for short positions
+        if side == 'short':
+            size = -size
 
         self.position = {
             'size': size,
-            'side': 'long' if size > 0 else 'short',
+            'side': side,
             'entry_price': entry_price,
             'liq_price': liq_price,
         }
+        self.state.inventory = size
 
         # Calculate distance to liquidation
         if liq_price > 0:
@@ -709,13 +748,16 @@ class LiveTrader:
             # Cancel existing orders
             self._cancel_all_orders()
 
+            # Build order kwargs: always use value_usdt (calculated from order_pct)
+            order_kwargs = {'value_usdt': self.order_value_usdt}
+
             # Place new LIMIT_MAKER orders (respect inventory limits)
             if not skip_buy:
                 bid_result = self.client.place_maker_order(
                     symbol=self.symbol,
                     side="Buy",
-                    qty=str(self.order_size),
                     price=str(round(bid, 2)),
+                    **order_kwargs,
                 )
                 self.state.bid_order_id = bid_result.get("orderId")
                 self.state.bid_price = bid
@@ -730,8 +772,8 @@ class LiveTrader:
                 ask_result = self.client.place_maker_order(
                     symbol=self.symbol,
                     side="Sell",
-                    qty=str(self.order_size),
                     price=str(round(ask, 2)),
+                    **order_kwargs,
                 )
                 self.state.ask_order_id = ask_result.get("orderId")
                 self.state.ask_price = ask
@@ -744,13 +786,13 @@ class LiveTrader:
 
             spread_bps = (ask - bid) / self.state.current_price * 10000
             print(
-                f"[{datetime.now()}] Quotes updated: "
-                f"Bid ${bid:.2f} | Ask ${ask:.2f} | Spread {spread_bps:.1f}bps"
+                f"{Colors.CYAN}📊 [{datetime.now().strftime('%H:%M:%S')}] Quotes updated: "
+                f"Bid ${bid:.2f} | Ask ${ask:.2f} | Spread {spread_bps:.1f}bps{Colors.RESET}"
             )
 
         except Exception as e:
             self.state.errors.append(f"Quote update error: {e}")
-            print(f"Quote update error: {e}")
+            print(f"{Colors.RED}❌ Quote update error: {e}{Colors.RESET}")
 
     def _cancel_all_orders(self):
         """Cancel all open orders."""
@@ -767,6 +809,15 @@ class LiveTrader:
             if self.dry_run:
                 # In dry-run mode, use simulated fill checking
                 fills = self.client.check_fills(self.state.current_price)
+
+                # Verbose: log fill check attempts
+                if not fills and self.state.trades_count == 0:
+                    # Only log this occasionally to avoid spam
+                    if int(time.time()) % 30 == 0:  # Every 30 seconds
+                        print(f"{Colors.CYAN}[{datetime.now().strftime('%H:%M:%S')}] Checking fills... "
+                              f"(Bid: ${self.state.bid_price:.2f} | Market: ${self.state.current_price:.2f} | "
+                              f"Ask: ${self.state.ask_price:.2f}){Colors.RESET}")
+
                 for fill in fills:
                     order_id = fill.get("orderId")
                     if order_id and order_id not in self._processed_fills:
@@ -795,10 +846,13 @@ class LiveTrader:
                         if len(self._recent_fills) > FILL_IMBALANCE_WINDOW * 2:
                             self._recent_fills = self._recent_fills[-FILL_IMBALANCE_WINDOW * 2:]
 
+                        # Color-coded fill logging
+                        color = Colors.GREEN if fill_side == 'buy' else Colors.RED
+                        emoji = "🟢" if fill_side == 'buy' else "🔴"
                         print(
-                            f"[{datetime.now()}] FILL: {side} {qty} "
-                            f"@ ${price:.2f} (fee: ${fee:.4f}) "
-                            f"[inv: {self.state.inventory:.6f}]"
+                            f"{color}{Colors.BOLD}{emoji} [{datetime.now().strftime('%H:%M:%S')}] FILL: {side.upper()} "
+                            f"{qty:.6f} BTC @ ${price:.2f} | Fee: ${fee:.4f} | "
+                            f"Inventory: {self.state.inventory:+.6f} BTC{Colors.RESET}"
                         )
             else:
                 # In live mode, check order history
@@ -835,10 +889,13 @@ class LiveTrader:
                         if len(self._recent_fills) > FILL_IMBALANCE_WINDOW * 2:
                             self._recent_fills = self._recent_fills[-FILL_IMBALANCE_WINDOW * 2:]
 
+                        # Color-coded fill logging
+                        color = Colors.GREEN if fill_side == 'buy' else Colors.RED
+                        emoji = "🟢" if fill_side == 'buy' else "🔴"
                         print(
-                            f"[{datetime.now()}] FILL: {side} {qty} "
-                            f"@ ${price:.2f} (fee: ${fee:.4f}) "
-                            f"[inv: {self.state.inventory:.6f}]"
+                            f"{color}{Colors.BOLD}{emoji} [{datetime.now().strftime('%H:%M:%S')}] FILL: {side.upper()} "
+                            f"{qty:.6f} BTC @ ${price:.2f} | Fee: ${fee:.4f} | "
+                            f"Inventory: {self.state.inventory:+.6f} BTC{Colors.RESET}"
                         )
 
         except Exception as e:
@@ -912,7 +969,8 @@ class LiveTrader:
         print(f"Exchange:       {exchange_name} ({mode})")
         print(f"Symbol:         {self.symbol}")
         print(f"Initial Capital: ${self.initial_capital:,.2f}")
-        print(f"Order Size:     {self.order_size} BTC")
+        print(f"Order Pct:      {self.order_pct}% of capital")
+        print(f"Order Value:    ${self.order_value_usdt:,.2f} USDT per order")
         if self.use_futures:
             print(f"Leverage:       {self.leverage}x")
         print(f"Fee Tier:       {fee_tier} (maker: {self.fee_model.schedule.maker:.4%})")

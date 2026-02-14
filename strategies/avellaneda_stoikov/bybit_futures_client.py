@@ -5,6 +5,7 @@ Provides both live trading (BybitFuturesClient) and simulated trading
 (DryRunFuturesClient) with leverage, liquidation, and position management.
 """
 
+import math
 import os
 import time
 from typing import Optional, Dict, List
@@ -75,6 +76,21 @@ class BybitFuturesClient:
         """
         return self.exchange.set_margin_mode(mode, symbol)
 
+    def calculate_qty_from_value(self, value_usdt: float, price: float, lot_size: float = 0.001) -> float:
+        """Convert USDT value to BTC quantity, rounded down to lot size.
+
+        Args:
+            value_usdt: Order value in USDT
+            price: Current price per BTC
+            lot_size: Minimum order increment (0.001 BTC for BTCUSDT)
+
+        Returns:
+            Quantity in BTC (at least lot_size)
+        """
+        qty = value_usdt / price
+        qty = math.floor(qty / lot_size) * lot_size
+        return max(qty, lot_size)
+
     def fetch_ticker(self, symbol: str) -> Dict:
         """Get market ticker data.
 
@@ -107,25 +123,36 @@ class BybitFuturesClient:
         self,
         symbol: str,
         side: str,
-        amount: float,
+        amount: float = 0.0,
         price: Optional[float] = None,
         order_type: str = 'limit',
-        params: Optional[Dict] = None
+        params: Optional[Dict] = None,
+        value_usdt: Optional[float] = None,
     ) -> Dict:
         """Place an order.
 
         Args:
             symbol: Trading symbol
             side: 'buy' or 'sell'
-            amount: Order amount in contracts
+            amount: Order amount in BTC (ignored if value_usdt provided)
             price: Limit price (required for limit orders)
             order_type: 'limit' or 'market'
             params: Additional parameters
+            value_usdt: Order value in USDT (converted to qty client-side)
 
         Returns:
             Order result dict
         """
         order_params = params or {}
+
+        # Convert value_usdt to amount if provided
+        if value_usdt is not None:
+            if price is None:
+                ticker = self.fetch_ticker(symbol)
+                conversion_price = float(ticker.get('last', 0))
+            else:
+                conversion_price = float(price)  # Convert string price to float
+            amount = self.calculate_qty_from_value(value_usdt, conversion_price)
 
         # Add postOnly for limit orders (maker-only)
         if order_type == 'limit':
@@ -140,8 +167,27 @@ class BybitFuturesClient:
             params=order_params
         )
 
-    def place_maker_order(self, symbol: str, side: str, price: float, qty: Optional[float] = None, amount: Optional[float] = None) -> Dict:
-        """Alias for place_order with postOnly (maker-only)."""
+    def place_maker_order(
+        self,
+        symbol: str,
+        side: str,
+        price: float,
+        qty: Optional[float] = None,
+        amount: Optional[float] = None,
+        value_usdt: Optional[float] = None,
+    ) -> Dict:
+        """Place a maker-only limit order.
+
+        Args:
+            symbol: Trading symbol
+            side: 'buy' or 'sell'
+            price: Limit price
+            qty: Order quantity in BTC
+            amount: Alias for qty
+            value_usdt: Order value in USDT (converted to qty client-side)
+        """
+        if value_usdt is not None:
+            return self.place_order(symbol, side, price=price, order_type='limit', value_usdt=value_usdt)
         order_amount = qty if qty is not None else amount
         return self.place_order(symbol, side, order_amount, price, order_type='limit')
 
@@ -272,6 +318,21 @@ class DryRunFuturesClient:
         if self.position:
             self.position['liq_price'] = self.calculate_liquidation_price()
 
+    def calculate_qty_from_value(self, value_usdt: float, price: float, lot_size: float = 0.001) -> float:
+        """Convert USDT value to BTC quantity, rounded down to lot size.
+
+        Args:
+            value_usdt: Order value in USDT
+            price: Current price per BTC
+            lot_size: Minimum order increment (0.001 BTC for BTCUSDT)
+
+        Returns:
+            Quantity in BTC (at least lot_size)
+        """
+        qty = value_usdt / price
+        qty = math.floor(qty / lot_size) * lot_size
+        return max(qty, lot_size)
+
     def fetch_ticker(self, symbol: str) -> Dict:
         """Get real market ticker data.
 
@@ -314,7 +375,7 @@ class DryRunFuturesClient:
 
         return {
             'symbol': symbol,
-            'contracts': self.position['size'],
+            'contracts': abs(self.position['size']),  # Always unsigned like ccxt
             'side': self.position['side'],
             'entryPrice': self.position['entry_price'],
             'liquidationPrice': self.position.get('liq_price'),
@@ -324,24 +385,35 @@ class DryRunFuturesClient:
         self,
         symbol: str,
         side: str,
-        amount: float,
+        amount: float = 0.0,
         price: Optional[float] = None,
         order_type: str = 'limit',
-        params: Optional[Dict] = None
+        params: Optional[Dict] = None,
+        value_usdt: Optional[float] = None,
     ) -> Dict:
         """Place simulated order.
 
         Args:
             symbol: Trading symbol
             side: 'buy' or 'sell'
-            amount: Order amount
+            amount: Order amount in BTC (ignored if value_usdt provided)
             price: Limit price
             order_type: Order type
             params: Additional parameters
+            value_usdt: Order value in USDT (converted to qty client-side)
 
         Returns:
             Order dict with orderId
         """
+        # Convert value_usdt to amount if provided
+        if value_usdt is not None:
+            if price is None:
+                ticker = self.fetch_ticker(symbol)
+                conversion_price = float(ticker.get('last', 0))
+            else:
+                conversion_price = float(price)  # Convert string price to float
+            amount = self.calculate_qty_from_value(value_usdt, conversion_price)
+
         self.order_counter += 1
         order_id = f"sim_{int(time.time())}_{self.order_counter}"
 
@@ -358,8 +430,27 @@ class DryRunFuturesClient:
 
         return {'orderId': order_id, 'status': 'open'}
 
-    def place_maker_order(self, symbol: str, side: str, price: float, qty: Optional[float] = None, amount: Optional[float] = None) -> Dict:
-        """Alias for place_order (simulated maker order)."""
+    def place_maker_order(
+        self,
+        symbol: str,
+        side: str,
+        price: float,
+        qty: Optional[float] = None,
+        amount: Optional[float] = None,
+        value_usdt: Optional[float] = None,
+    ) -> Dict:
+        """Place simulated maker-only limit order.
+
+        Args:
+            symbol: Trading symbol
+            side: 'buy' or 'sell'
+            price: Limit price
+            qty: Order quantity in BTC
+            amount: Alias for qty
+            value_usdt: Order value in USDT (converted to qty client-side)
+        """
+        if value_usdt is not None:
+            return self.place_order(symbol, side, price=price, order_type='limit', value_usdt=value_usdt)
         order_amount = qty if qty is not None else amount
         return self.place_order(symbol, side, order_amount, price, order_type='limit')
 
