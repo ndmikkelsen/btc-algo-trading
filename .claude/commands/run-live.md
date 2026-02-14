@@ -1,11 +1,11 @@
 ---
 triggers: ['/run-live', 'start live trading', 'run live trader', 'go live']
-description: Launch GLFT market maker with real orders on MEXC
+description: Launch GLFT market maker with real orders on Bybit Futures
 ---
 
 # /run-live — Live Trading Launcher
 
-Launch the GLFT market maker with real orders on MEXC.
+Launch the GLFT market maker with real orders on Bybit Futures.
 
 ## Usage
 
@@ -32,34 +32,37 @@ Extract flags from the user's command. All flags are optional with smart default
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--symbol` | `BTCUSDT` | Trading pair |
+| `--symbol` | `BTC/USDT:USDT` | Trading pair (Bybit perpetual format) |
+| `--leverage` | `5` | Leverage (1-100x) |
 | `--gamma` | `0.005` | Risk aversion γ (1/$² units) |
-| `--kappa` | `live` | Kappa mode: `live` (from order book) or `constant` |
+| `--kappa` | `constant` | Kappa mode: `constant` (Bybit futures) or `live` |
 | `--kappa-value` | `0.5` | κ value when `--kappa=constant` (1/$ units) |
-| `--arrival-rate` | `20.0` | Arrival rate A for constant kappa mode |
-| `--order-size` | `0.003` | Order size in BTC |
+| `--arrival-rate` | `50.0` | Arrival rate A for constant kappa mode |
+| `--order-size` | `0.001` | Order size in BTC (min 0.001 for Bybit) |
 | `--interval` | `5.0` | Quote update interval (seconds) |
 | `--min-spread` | `5.0` | Minimum spread in dollars |
 | `--max-spread` | `100.0` | Maximum spread in dollars |
-| `--capital` | `1000.0` | Initial capital in USDT |
-| `--fee-tier` | `regular` | Fee tier: `regular`, `mx_deduction` |
+| `--capital` | `500.0` | Initial capital in USDT |
+| `--fee-tier` | `bybit_vip0` | Fee tier: `bybit_vip0`, `bybit_vip1` |
 | `--no-regime-filter` | false | Disable regime detection |
 | `--dry-run` | false | Override to paper trade mode |
 
 ### Step 2: Validate Environment
 
 ```bash
-# Check that MEXC credentials are set (required for live trading)
-if [ -z "$MEXC_API_KEY" ] || [ -z "$MEXC_API_SECRET" ]; then
+# Check that Bybit credentials are set (required for live trading)
+if [ -z "$BYBIT_API_KEY" ] || [ -z "$BYBIT_API_SECRET" ]; then
   # Try loading from .env
   source .env 2>/dev/null
 fi
 ```
 
-If `--dry-run` is NOT set, verify `MEXC_API_KEY` and `MEXC_API_SECRET` are available.
+If `--dry-run` is NOT set, verify `BYBIT_API_KEY` and `BYBIT_API_SECRET` are available.
 If missing, **stop and warn the user** — do NOT proceed with live trading without credentials.
 
 If `--dry-run` IS set, credentials are optional (dummy keys used automatically).
+
+Also check for `SOCKS5_PROXY` if geo-blocking is an issue (Bybit blocks some regions).
 
 ### Step 3: Confirm Live Trading
 
@@ -106,8 +109,10 @@ if [ "$DRY_RUN" = true ]; then
   LIVE_FLAG=""
 fi
 
-CMD="python scripts/run_paper_trader.py \
+CMD="python3 scripts/run_paper_trader.py \
+  --futures \
   --model=glft \
+  --leverage=${LEVERAGE} \
   --gamma=${GAMMA} \
   --kappa=${KAPPA_MODE} \
   --kappa-value=${KAPPA_VALUE} \

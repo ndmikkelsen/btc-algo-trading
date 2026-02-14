@@ -134,10 +134,12 @@ class LiveTrader:
         kappa_provider: Optional[KappaProvider] = None,
         use_futures: bool = USE_FUTURES,
         leverage: int = LEVERAGE,
+        order_value_usdt: Optional[float] = None,
     ):
         self.symbol = symbol
         self.initial_capital = initial_capital
         self.order_size = order_size
+        self.order_value_usdt = order_value_usdt
         self.use_regime_filter = use_regime_filter
         self.quote_interval = quote_interval
         self.dry_run = dry_run
@@ -508,6 +510,7 @@ class LiveTrader:
 
         if abs(size) < 1e-8:
             self.position = None
+            self.state.inventory = 0.0
             return
 
         self.position = {
@@ -516,6 +519,7 @@ class LiveTrader:
             'entry_price': entry_price,
             'liq_price': liq_price,
         }
+        self.state.inventory = size
 
         # Calculate distance to liquidation
         if liq_price > 0:
@@ -709,13 +713,19 @@ class LiveTrader:
             # Cancel existing orders
             self._cancel_all_orders()
 
+            # Build order kwargs: use value_usdt if configured (futures only), else qty
+            if self.order_value_usdt is not None and self.use_futures:
+                order_kwargs = {'value_usdt': self.order_value_usdt}
+            else:
+                order_kwargs = {'qty': str(self.order_size)}
+
             # Place new LIMIT_MAKER orders (respect inventory limits)
             if not skip_buy:
                 bid_result = self.client.place_maker_order(
                     symbol=self.symbol,
                     side="Buy",
-                    qty=str(self.order_size),
                     price=str(round(bid, 2)),
+                    **order_kwargs,
                 )
                 self.state.bid_order_id = bid_result.get("orderId")
                 self.state.bid_price = bid
@@ -730,8 +740,8 @@ class LiveTrader:
                 ask_result = self.client.place_maker_order(
                     symbol=self.symbol,
                     side="Sell",
-                    qty=str(self.order_size),
                     price=str(round(ask, 2)),
+                    **order_kwargs,
                 )
                 self.state.ask_order_id = ask_result.get("orderId")
                 self.state.ask_price = ask
@@ -912,7 +922,10 @@ class LiveTrader:
         print(f"Exchange:       {exchange_name} ({mode})")
         print(f"Symbol:         {self.symbol}")
         print(f"Initial Capital: ${self.initial_capital:,.2f}")
-        print(f"Order Size:     {self.order_size} BTC")
+        if self.order_value_usdt is not None:
+            print(f"Order Value:    ${self.order_value_usdt:,.2f} USDT (auto-sized)")
+        else:
+            print(f"Order Size:     {self.order_size} BTC")
         if self.use_futures:
             print(f"Leverage:       {self.leverage}x")
         print(f"Fee Tier:       {fee_tier} (maker: {self.fee_model.schedule.maker:.4%})")
