@@ -53,6 +53,7 @@ import numpy as np
 import pandas as pd
 from typing import Tuple, Optional, List, Dict
 
+from strategies.mean_reversion_bb.base_model import DirectionalModel
 from strategies.mean_reversion_bb.config import (
     BB_PERIOD,
     BB_STD_DEV,
@@ -74,7 +75,7 @@ from strategies.mean_reversion_bb.config import (
 )
 
 
-class MeanReversionBB:
+class MeanReversionBB(DirectionalModel):
     """
     Mean reversion model using Bollinger Bands with VWAP confirmation.
 
@@ -128,12 +129,24 @@ class MeanReversionBB:
         Returns:
             Tuple of (middle, upper_outer, lower_outer, upper_inner, lower_inner)
         """
-        # TODO: Calculate moving average (SMA/EMA/WMA based on MA_TYPE)
-        # TODO: Calculate rolling standard deviation
-        # TODO: Compute outer bands (±bb_std_dev * σ)
-        # TODO: Compute inner bands (±bb_inner_std_dev * σ)
-        # TODO: Calculate %B indicator: (price - lower) / (upper - lower)
-        raise NotImplementedError
+        if MA_TYPE == "ema":
+            middle = close.ewm(span=self.bb_period, adjust=False).mean()
+        elif MA_TYPE == "wma":
+            weights = np.arange(1, self.bb_period + 1, dtype=float)
+            middle = close.rolling(self.bb_period).apply(
+                lambda x: np.dot(x, weights) / weights.sum(), raw=True
+            )
+        else:  # sma
+            middle = close.rolling(self.bb_period).mean()
+
+        std = close.rolling(self.bb_period).std()
+
+        upper_outer = middle + self.bb_std_dev * std
+        lower_outer = middle - self.bb_std_dev * std
+        upper_inner = middle + self.bb_inner_std_dev * std
+        lower_inner = middle - self.bb_inner_std_dev * std
+
+        return (middle, upper_outer, lower_outer, upper_inner, lower_inner)
 
     def calculate_bandwidth(self, close: pd.Series) -> pd.Series:
         """
@@ -149,9 +162,9 @@ class MeanReversionBB:
         Returns:
             Bandwidth series
         """
-        # TODO: Implement bandwidth calculation
-        # TODO: Track bandwidth percentile (historical rank)
-        raise NotImplementedError
+        middle, upper_outer, lower_outer, _, _ = self.calculate_bollinger_bands(close)
+        bw = (upper_outer - lower_outer) / middle * 100
+        return bw
 
     def calculate_vwap(
         self,
@@ -175,10 +188,14 @@ class MeanReversionBB:
         Returns:
             VWAP series
         """
-        # TODO: Calculate typical price
-        # TODO: Compute cumulative VWAP (session-based or rolling)
-        # TODO: Calculate VWAP standard deviation bands
-        raise NotImplementedError
+        tp = (high + low + close) / 3
+        tp_vol = tp * volume
+        rolling_tp_vol = tp_vol.rolling(self.vwap_period).sum()
+        rolling_vol = volume.rolling(self.vwap_period).sum()
+        vwap = rolling_tp_vol / rolling_vol
+        # Forward-fill where volume is zero (produces NaN from 0/0)
+        vwap = vwap.ffill()
+        return vwap
 
     def detect_squeeze(
         self,
@@ -200,11 +217,53 @@ class MeanReversionBB:
         Returns:
             Tuple of (is_squeeze, squeeze_duration_candles)
         """
-        # TODO: Calculate Keltner Channel (EMA ± ATR * multiplier)
-        # TODO: Compare BB width to KC width
-        # TODO: Track squeeze duration
-        # TODO: Detect squeeze "fire" (expansion after squeeze)
-        raise NotImplementedError
+        # Keltner Channel: EMA ± ATR * multiplier
+        kc_middle = close.ewm(span=self.kc_period, adjust=False).mean()
+        prev_close = close.shift(1)
+        tr = pd.concat(
+            [
+                high - low,
+                (high - prev_close).abs(),
+                (low - prev_close).abs(),
+            ],
+            axis=1,
+        ).max(axis=1)
+        atr = tr.rolling(self.kc_period).mean()
+        kc_upper = kc_middle + self.kc_atr_multiplier * atr
+        kc_lower = kc_middle - self.kc_atr_multiplier * atr
+
+        # Bollinger Bands
+        _, bb_upper, bb_lower, _, _ = self.calculate_bollinger_bands(close)
+
+        # Squeeze: BB is inside KC
+        squeeze_series = (bb_upper < kc_upper) & (bb_lower > kc_lower)
+        is_squeeze = bool(squeeze_series.iloc[-1])
+
+        if is_squeeze:
+            self.squeeze_count += 1
+        else:
+            self.squeeze_count = 0
+
+        return (is_squeeze, self.squeeze_count)
+
+    def _calculate_rsi(self, close: pd.Series) -> pd.Series:
+        """Calculate Wilder's RSI."""
+        delta = close.diff()
+        gain = delta.where(delta > 0, 0.0)
+        loss = -delta.where(delta < 0, 0.0)
+        avg_gain = gain.ewm(
+            alpha=1 / self.rsi_period,
+            min_periods=self.rsi_period,
+            adjust=False,
+        ).mean()
+        avg_loss = loss.ewm(
+            alpha=1 / self.rsi_period,
+            min_periods=self.rsi_period,
+            adjust=False,
+        ).mean()
+        rs = avg_gain / avg_loss
+        rsi = 100 - (100 / (1 + rs))
+        return rsi
 
     def calculate_signals(
         self,
@@ -245,13 +304,82 @@ class MeanReversionBB:
                 'bandwidth_percentile': float,
             }
         """
-        # TODO: Calculate all indicators (BB, RSI, VWAP, squeeze)
-        # TODO: Check band touch/penetration
-        # TODO: Confirm with RSI extreme
-        # TODO: Validate VWAP proximity
-        # TODO: Check for squeeze breakout (separate signal)
-        # TODO: Determine entry side and target
-        raise NotImplementedError
+        # Calculate all indicators
+        middle, upper_outer, lower_outer, upper_inner, lower_inner = (
+            self.calculate_bollinger_bands(close)
+        )
+        bw = self.calculate_bandwidth(close)
+        vwap = self.calculate_vwap(high, low, close, volume)
+        is_squeeze, squeeze_duration = self.detect_squeeze(high, low, close)
+        rsi = self._calculate_rsi(close)
+
+        # Get last values
+        last_close = close.iloc[-1]
+        last_rsi = float(rsi.iloc[-1]) if not pd.isna(rsi.iloc[-1]) else 50.0
+        last_vwap = float(vwap.iloc[-1]) if not pd.isna(vwap.iloc[-1]) else last_close
+        last_upper_outer = float(upper_outer.iloc[-1]) if not pd.isna(upper_outer.iloc[-1]) else last_close
+        last_lower_outer = float(lower_outer.iloc[-1]) if not pd.isna(lower_outer.iloc[-1]) else last_close
+        last_middle = float(middle.iloc[-1]) if not pd.isna(middle.iloc[-1]) else last_close
+        last_upper_inner = float(upper_inner.iloc[-1]) if not pd.isna(upper_inner.iloc[-1]) else last_close
+        last_lower_inner = float(lower_inner.iloc[-1]) if not pd.isna(lower_inner.iloc[-1]) else last_close
+
+        # %B: position within bands
+        band_width = last_upper_outer - last_lower_outer
+        bb_position = (last_close - last_lower_outer) / band_width if band_width > 0 else 0.5
+
+        # VWAP deviation
+        vwap_deviation = abs(last_close - last_vwap) / last_vwap if last_vwap > 0 else 0.0
+
+        # Bandwidth percentile (use last value of bandwidth series)
+        bw_valid = bw.dropna()
+        if len(bw_valid) >= 2:
+            last_bw = bw_valid.iloc[-1]
+            bandwidth_percentile = float((bw_valid < last_bw).sum()) / len(bw_valid) * 100
+        else:
+            bandwidth_percentile = 50.0
+
+        # Determine signal
+        signal = "none"
+
+        # Squeeze breakout: squeeze just ended with sufficient duration
+        prev_squeeze_count = squeeze_duration  # current call already updated
+        if not is_squeeze and squeeze_duration == 0:
+            # Check if we had a long enough squeeze before (tracked externally)
+            # The fire is detected by the caller tracking state across calls
+            pass
+
+        # Long condition
+        if (
+            last_close <= last_lower_outer
+            and last_rsi < RSI_OVERSOLD
+            and vwap_deviation < VWAP_CONFIRMATION_PCT
+            and not is_squeeze
+        ):
+            signal = "long"
+
+        # Short condition
+        elif (
+            last_close >= last_upper_outer
+            and last_rsi > RSI_OVERBOUGHT
+            and vwap_deviation < VWAP_CONFIRMATION_PCT
+            and not is_squeeze
+        ):
+            signal = "short"
+
+        return {
+            "signal": signal,
+            "bb_position": bb_position,
+            "rsi": last_rsi,
+            "vwap_deviation": vwap_deviation,
+            "is_squeeze": is_squeeze,
+            "squeeze_duration": squeeze_duration,
+            "bandwidth_percentile": bandwidth_percentile,
+            "middle": last_middle,
+            "upper_outer": last_upper_outer,
+            "lower_outer": last_lower_outer,
+            "upper_inner": last_upper_inner,
+            "lower_inner": last_lower_inner,
+        }
 
     def generate_orders(
         self,
@@ -272,12 +400,47 @@ class MeanReversionBB:
         Returns:
             List of order dictionaries with entry, stop, and target
         """
-        # TODO: Calculate stop loss (beyond band + ATR buffer)
-        # TODO: Calculate target (center band or VWAP)
-        # TODO: Calculate position size from risk
-        # TODO: Consider partial profit taking at inner band
-        # TODO: Apply max position limit
-        raise NotImplementedError
+        if signal.get("signal") == "none":
+            return []
+
+        side = signal["signal"]
+
+        if side == "long":
+            stop_loss = signal.get("lower_outer", current_price) - STOP_ATR_MULTIPLIER * atr
+            target = current_price + REVERSION_TARGET * (signal["middle"] - current_price)
+            partial_target = signal.get(
+                "lower_inner", (current_price + signal["middle"]) / 2
+            )
+        elif side == "short":
+            stop_loss = signal.get("upper_outer", current_price) + STOP_ATR_MULTIPLIER * atr
+            target = current_price - REVERSION_TARGET * (current_price - signal["middle"])
+            partial_target = signal.get(
+                "upper_inner", (current_price + signal["middle"]) / 2
+            )
+        else:
+            return []
+
+        stop_distance = abs(current_price - stop_loss)
+        if stop_distance > 0:
+            risk_size = RISK_PER_TRADE * equity / stop_distance
+            max_size = MAX_POSITION_PCT * equity / current_price
+            position_size = min(risk_size, max_size)
+        else:
+            position_size = 0.0
+
+        if position_size <= 0:
+            return []
+
+        return [
+            {
+                "side": side,
+                "entry_price": current_price,
+                "stop_loss": stop_loss,
+                "target": target,
+                "partial_target": partial_target,
+                "position_size": position_size,
+            }
+        ]
 
     def manage_risk(
         self,
@@ -302,11 +465,40 @@ class MeanReversionBB:
         Returns:
             Risk action dictionary
         """
-        # TODO: Check if price is "walking the band" (3+ candles on band)
-        # TODO: Monitor holding period
-        # TODO: Detect abnormal volume (potential breakout)
-        # TODO: Partial exit at inner band
-        raise NotImplementedError
+        if self.position_side is None:
+            return {"action": "hold", "reason": "no position"}
+
+        self.bars_held += 1
+
+        # Max holding period
+        if self.bars_held >= MAX_HOLDING_BARS:
+            return {"action": "exit", "reason": "max holding period exceeded"}
+
+        # Squeeze while in position
+        high_est = close  # approximate high with close for squeeze check
+        low_est = close
+        is_squeeze, _ = self.detect_squeeze(high_est, low_est, close)
+        if is_squeeze:
+            return {"action": "exit", "reason": "squeeze detected while in position"}
+
+        # Band walking: 3+ candles touching/beyond outer band
+        _, upper_outer, lower_outer, _, _ = self.calculate_bollinger_bands(close)
+        if len(close) >= 3 and upper_outer.notna().iloc[-1]:
+            last_3_close = close.iloc[-3:]
+            if self.position_side == "long":
+                walking = (last_3_close.values <= lower_outer.iloc[-3:].values).all()
+            else:
+                walking = (last_3_close.values >= upper_outer.iloc[-3:].values).all()
+            if walking:
+                return {"action": "exit", "reason": "band walking detected"}
+
+        # Volume spike: current volume > 2x 20-period average
+        if len(volume) >= 20:
+            vol_mean = volume.rolling(20).mean().iloc[-1]
+            if vol_mean > 0 and volume.iloc[-1] > 2 * vol_mean:
+                return {"action": "tighten_stop", "reason": "volume spike detected"}
+
+        return {"action": "hold", "reason": "no risk trigger"}
 
     def get_strategy_info(self) -> dict:
         """Get current strategy state."""

@@ -81,8 +81,8 @@ TIMEFRAME = "5m"
 QUOTE_REFRESH_INTERVAL = 5.0
 
 # =============================================================================
-# Fee Parameters (Bybit Spot)
+# Fee Parameters (Bybit Futures)
 # =============================================================================
 
-MAKER_FEE = 0.001
-TAKER_FEE = 0.001
+MAKER_FEE = 0.0001   # 0.01% maker
+TAKER_FEE = 0.0006   # 0.06% taker

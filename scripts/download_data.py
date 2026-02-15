@@ -1,157 +1,282 @@
 #!/usr/bin/env python3
-"""Download BTC/USDT historical data from Bybit.
+"""Download historical OHLCV data from Bybit for backtesting.
 
 Usage:
-    python scripts/download_data.py [--timeframe 1h] [--days 365]
+    python scripts/download_data.py                          # Download 5m BTC/USDT
+    python scripts/download_data.py --timeframe 1h           # Download 1h candles
+    python scripts/download_data.py --start 2023-01-01       # Custom start date
 """
 
 import argparse
-import pandas as pd
-import ccxt
-from pathlib import Path
-from datetime import datetime, timedelta
+import os
+import sys
 import time
+from datetime import datetime, timezone
+
+import ccxt
+import pandas as pd
+
+
+# Bybit API returns max 200 candles per request
+BYBIT_LIMIT = 200
+
+# Milliseconds per timeframe
+TIMEFRAME_MS = {
+    "1m": 60 * 1000,
+    "5m": 5 * 60 * 1000,
+    "15m": 15 * 60 * 1000,
+    "1h": 60 * 60 * 1000,
+    "4h": 4 * 60 * 60 * 1000,
+    "1d": 24 * 60 * 60 * 1000,
+}
+
+SYMBOL = "BTC/USDT:USDT"
+OUTPUT_DIR = "data"
+
+
+def init_exchange() -> ccxt.bybit:
+    """Initialize ccxt Bybit exchange (public, no auth needed).
+
+    Reads SOCKS5_PROXY from environment for geo-restricted regions.
+    """
+    config: dict = {"enableRateLimit": True}
+
+    proxy = os.getenv("SOCKS5_PROXY")
+    if proxy:
+        config["proxies"] = {"http": proxy, "https": proxy}
+        print(f"Using proxy: {proxy}")
+
+    return ccxt.bybit(config)
+
+
+def load_existing_data(filepath: str) -> pd.DataFrame | None:
+    """Load existing CSV and return DataFrame, or None if file doesn't exist."""
+    if not os.path.exists(filepath):
+        return None
+
+    df = pd.read_csv(filepath)
+    if df.empty:
+        return None
+
+    print(f"Found existing data: {len(df)} rows")
+    print(f"  Last timestamp: {df['timestamp'].iloc[-1]} ms")
+    return df
 
 
 def download_ohlcv(
-    symbol: str = "BTC/USDT",
-    timeframe: str = "1h",
-    days: int = 365,
-    exchange_id: str = "bybit",
-    output_dir: str = "data",
+    timeframe: str = "5m",
+    start_date: str | None = None,
+    output_dir: str = OUTPUT_DIR,
 ) -> pd.DataFrame:
-    """
-    Download OHLCV data from exchange.
+    """Download OHLCV data from Bybit, appending to existing CSV if present.
 
     Args:
-        symbol: Trading pair (e.g., "BTC/USDT")
-        timeframe: Candle timeframe (1m, 5m, 15m, 1h, 4h, 1d)
-        days: Number of days of history to download
-        exchange_id: Exchange to use (bybit, binance, etc.)
-        output_dir: Directory to save data
+        timeframe: Candle timeframe (1m, 5m, 15m, 1h, 4h, 1d).
+        start_date: Start date as YYYY-MM-DD string. Defaults to 2 years ago.
+        output_dir: Directory to save output CSV.
 
     Returns:
-        DataFrame with OHLCV data
+        Complete DataFrame with all downloaded data.
     """
-    print(f"Downloading {symbol} {timeframe} data from {exchange_id}")
-    print(f"Fetching {days} days of history...")
+    ms_per_candle = TIMEFRAME_MS.get(timeframe)
+    if ms_per_candle is None:
+        print(f"Error: unsupported timeframe '{timeframe}'")
+        print(f"Supported: {', '.join(TIMEFRAME_MS.keys())}")
+        sys.exit(1)
 
-    # Initialize exchange
-    exchange_class = getattr(ccxt, exchange_id)
-    exchange = exchange_class({
-        'enableRateLimit': True,
-    })
+    os.makedirs(output_dir, exist_ok=True)
+    filename = f"btcusdt_{timeframe}.csv"
+    filepath = os.path.join(output_dir, filename)
 
-    # Calculate start time
-    since = exchange.parse8601(
-        (datetime.utcnow() - timedelta(days=days)).isoformat()
-    )
+    # Determine start time
+    existing_df = load_existing_data(filepath)
 
-    # Timeframe to milliseconds
-    timeframe_ms = {
-        '1m': 60 * 1000,
-        '5m': 5 * 60 * 1000,
-        '15m': 15 * 60 * 1000,
-        '1h': 60 * 60 * 1000,
-        '4h': 4 * 60 * 60 * 1000,
-        '1d': 24 * 60 * 60 * 1000,
-    }
+    if existing_df is not None:
+        # Resume from last timestamp + 1 candle
+        since_ms = int(existing_df["timestamp"].iloc[-1]) + ms_per_candle
+        print(f"Resuming download from {datetime.fromtimestamp(since_ms / 1000, tz=timezone.utc).isoformat()}")
+    elif start_date:
+        dt = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        since_ms = int(dt.timestamp() * 1000)
+    else:
+        # Default: 2 years ago
+        now = datetime.now(timezone.utc)
+        start = now.replace(year=now.year - 2)
+        since_ms = int(start.timestamp() * 1000)
 
-    ms_per_candle = timeframe_ms.get(timeframe, 60 * 60 * 1000)
-    expected_candles = int((days * 24 * 60 * 60 * 1000) / ms_per_candle)
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 
-    print(f"Expected ~{expected_candles} candles")
+    if since_ms >= now_ms:
+        print("Data is already up to date.")
+        return existing_df if existing_df is not None else pd.DataFrame()
 
-    # Fetch data in batches
-    all_ohlcv = []
-    current_since = since
-    batch_size = 1000  # Most exchanges limit to 1000 per request
+    print(f"Downloading {SYMBOL} {timeframe} from Bybit")
+    start_dt = datetime.fromtimestamp(since_ms / 1000, tz=timezone.utc)
+    print(f"  From: {start_dt.strftime('%Y-%m-%d %H:%M UTC')}")
+    print(f"  Symbol: {SYMBOL}")
 
-    while True:
+    expected_candles = (now_ms - since_ms) // ms_per_candle
+    print(f"  Expected: ~{expected_candles:,} candles")
+
+    exchange = init_exchange()
+
+    # Fetch in paginated batches
+    all_rows: list[list] = []
+    request_count = 0
+    current_since = since_ms
+
+    while current_since < now_ms:
         try:
             ohlcv = exchange.fetch_ohlcv(
-                symbol,
-                timeframe,
-                since=current_since,
-                limit=batch_size,
+                SYMBOL, timeframe, since=current_since, limit=BYBIT_LIMIT
             )
+        except ccxt.RateLimitExceeded:
+            print("  Rate limited, waiting 5s...")
+            time.sleep(5)
+            continue
+        except ccxt.NetworkError as e:
+            print(f"  Network error: {e}, retrying in 2s...")
+            time.sleep(2)
+            continue
 
-            if not ohlcv:
-                break
-
-            all_ohlcv.extend(ohlcv)
-
-            # Progress update
-            if len(all_ohlcv) % 5000 == 0:
-                print(f"  Downloaded {len(all_ohlcv)} candles...")
-
-            # Move to next batch
-            current_since = ohlcv[-1][0] + ms_per_candle
-
-            # Stop if we've reached current time
-            if current_since > exchange.milliseconds():
-                break
-
-            # Rate limiting
-            time.sleep(exchange.rateLimit / 1000)
-
-        except Exception as e:
-            print(f"Error fetching data: {e}")
+        if not ohlcv:
             break
 
-    if not all_ohlcv:
-        raise ValueError("No data downloaded")
+        all_rows.extend(ohlcv)
+        request_count += 1
 
-    # Convert to DataFrame
-    df = pd.DataFrame(
-        all_ohlcv,
-        columns=['timestamp', 'open', 'high', 'low', 'close', 'volume']
+        # Advance past last candle
+        current_since = ohlcv[-1][0] + ms_per_candle
+
+        # Progress every 50 requests
+        if request_count % 50 == 0:
+            fetched_dt = datetime.fromtimestamp(ohlcv[-1][0] / 1000, tz=timezone.utc)
+            print(f"  [{request_count} requests] {len(all_rows):,} candles, up to {fetched_dt.strftime('%Y-%m-%d %H:%M UTC')}")
+
+        # Rate limiting: 100ms between requests
+        time.sleep(0.1)
+
+    if not all_rows:
+        print("No new data to download.")
+        return existing_df if existing_df is not None else pd.DataFrame()
+
+    # Build DataFrame from new data
+    new_df = pd.DataFrame(
+        all_rows, columns=["timestamp", "open", "high", "low", "close", "volume"]
     )
 
-    # Convert timestamp to datetime
-    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-    df = df.set_index('timestamp')
+    # Deduplicate by timestamp
+    new_df = new_df.drop_duplicates(subset=["timestamp"], keep="first")
+    new_df = new_df.sort_values("timestamp").reset_index(drop=True)
 
-    # Remove duplicates
-    df = df[~df.index.duplicated(keep='first')]
+    # Merge with existing data
+    if existing_df is not None:
+        df = pd.concat([existing_df, new_df], ignore_index=True)
+        df = df.drop_duplicates(subset=["timestamp"], keep="first")
+        df = df.sort_values("timestamp").reset_index(drop=True)
+    else:
+        df = new_df
 
-    # Sort by time
-    df = df.sort_index()
+    # Validate data
+    issues = validate_data(df, ms_per_candle)
 
-    print(f"Downloaded {len(df)} candles")
-    print(f"Date range: {df.index[0]} to {df.index[-1]}")
+    # Save
+    df.to_csv(filepath, index=False)
+    print(f"\nSaved {len(df):,} candles to {filepath}")
 
-    # Save to file
-    output_path = Path(output_dir)
-    output_path.mkdir(exist_ok=True)
+    first_dt = datetime.fromtimestamp(df["timestamp"].iloc[0] / 1000, tz=timezone.utc)
+    last_dt = datetime.fromtimestamp(df["timestamp"].iloc[-1] / 1000, tz=timezone.utc)
+    print(f"  Range: {first_dt.strftime('%Y-%m-%d')} to {last_dt.strftime('%Y-%m-%d')}")
 
-    filename = f"btcusdt_{timeframe}.csv"
-    filepath = output_path / filename
-
-    df.to_csv(filepath)
-    print(f"Saved to {filepath}")
+    if issues:
+        print(f"\n  Validation warnings: {len(issues)}")
+        for issue in issues[:10]:
+            print(f"    - {issue}")
+        if len(issues) > 10:
+            print(f"    ... and {len(issues) - 10} more")
 
     return df
 
 
+def validate_data(df: pd.DataFrame, ms_per_candle: int) -> list[str]:
+    """Validate OHLCV data quality.
+
+    Checks:
+    - Gap detection: missing candles between consecutive timestamps.
+    - OHLC relationships: high >= max(open, close), low <= min(open, close).
+
+    Args:
+        df: OHLCV DataFrame with 'timestamp' column in UTC milliseconds.
+        ms_per_candle: Expected milliseconds between consecutive candles.
+
+    Returns:
+        List of validation warning strings.
+    """
+    issues: list[str] = []
+
+    # 1. Gap detection
+    timestamps = df["timestamp"].values
+    diffs = timestamps[1:] - timestamps[:-1]
+    gaps = diffs != ms_per_candle
+    gap_count = int(gaps.sum())
+
+    if gap_count > 0:
+        # Report first few gaps
+        gap_indices = gaps.nonzero()[0]
+        for idx in gap_indices[:5]:
+            expected = ms_per_candle
+            actual = int(diffs[idx])
+            missing = (actual // ms_per_candle) - 1
+            gap_dt = datetime.fromtimestamp(timestamps[idx] / 1000, tz=timezone.utc)
+            issues.append(
+                f"Gap at {gap_dt.strftime('%Y-%m-%d %H:%M')}: "
+                f"{missing} missing candle(s) ({actual}ms vs expected {expected}ms)"
+            )
+        if gap_count > 5:
+            issues.append(f"... {gap_count - 5} more gaps")
+
+    # 2. OHLC relationship checks
+    bad_high = df["high"] < df[["open", "close"]].max(axis=1)
+    bad_low = df["low"] > df[["open", "close"]].min(axis=1)
+
+    if bad_high.any():
+        count = int(bad_high.sum())
+        issues.append(f"{count} candle(s) where high < max(open, close)")
+
+    if bad_low.any():
+        count = int(bad_low.sum())
+        issues.append(f"{count} candle(s) where low > min(open, close)")
+
+    if not issues:
+        print("  Data validation: PASSED")
+    else:
+        print(f"  Data validation: {len(issues)} warning(s)")
+
+    return issues
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Download BTC/USDT OHLCV data")
-    parser.add_argument('--timeframe', '-t', default='1h',
-                        help='Timeframe (1m, 5m, 15m, 1h, 4h, 1d)')
-    parser.add_argument('--days', '-d', type=int, default=365,
-                        help='Days of history to download')
-    parser.add_argument('--exchange', '-e', default='bybit',
-                        help='Exchange (bybit, binance)')
-    parser.add_argument('--output', '-o', default='data',
-                        help='Output directory')
+    parser = argparse.ArgumentParser(
+        description="Download BTC/USDT OHLCV data from Bybit for backtesting."
+    )
+    parser.add_argument(
+        "--timeframe", "-t", default="5m",
+        help="Candle timeframe: 1m, 5m, 15m, 1h, 4h, 1d (default: 5m)",
+    )
+    parser.add_argument(
+        "--start", "-s", default=None,
+        help="Start date as YYYY-MM-DD (default: 2 years ago)",
+    )
+    parser.add_argument(
+        "--output", "-o", default=OUTPUT_DIR,
+        help=f"Output directory (default: {OUTPUT_DIR})",
+    )
 
     args = parser.parse_args()
 
     download_ohlcv(
-        symbol="BTC/USDT",
         timeframe=args.timeframe,
-        days=args.days,
-        exchange_id=args.exchange,
+        start_date=args.start,
         output_dir=args.output,
     )
 
