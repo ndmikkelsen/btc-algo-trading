@@ -348,14 +348,12 @@ class DryRunFuturesClient:
             Ticker dict from real market
         """
         try:
-            print(f"[DEBUG] Fetching ticker for {symbol}...")
             ticker = self.exchange.fetch_ticker(symbol)
-            print(f"[DEBUG] Ticker fetched: last={ticker.get('last', 0)}")
             return ticker
         except Exception as e:
-            print(f"Error fetching ticker: {e}")
-            import traceback
-            traceback.print_exc()
+            # Log network errors concisely (no traceback spam)
+            err_msg = str(e).split('\n')[0][:120]
+            print(f"[{symbol}] Ticker error: {err_msg}")
             # Return dummy data if market fetch fails
             return {
                 'last': 0,
@@ -427,7 +425,7 @@ class DryRunFuturesClient:
             'symbol': symbol,
             'side': side,
             'amount': amount,
-            'price': price,
+            'price': float(price) if price is not None else 0.0,
             'type': order_type,
             'status': 'open',
             'timestamp': time.time()

@@ -141,8 +141,12 @@ DISPLACEMENT_AGGRESSION = 2.0   # widening multiplier per threshold unit
 DISPLACEMENT_MAX_MULT = 3.0     # max spread multiplier
 
 # Inventory limits (multiples of order_size)
-INVENTORY_SOFT_LIMIT = 3   # start reducing order size
-INVENTORY_HARD_LIMIT = 5   # stop accumulating, reduce-only
+INVENTORY_SOFT_LIMIT = 2   # start reducing order size
+INVENTORY_HARD_LIMIT = 3   # stop accumulating, reduce-only
+
+# Active inventory reduction
+INVENTORY_MAX_HOLD_SECONDS = 300  # 5 min: force-reduce stale inventory
+INVENTORY_MAX_UNREALIZED_LOSS = 0.002  # 0.2% of capital: flatten if exceeded
 
 # Post-fill cooldown
 FILL_COOLDOWN_SECONDS = 3.0  # seconds to wait after a fill before re-quoting
@@ -185,7 +189,10 @@ LEVERAGE = 50        # Leverage multiplier (1-100 for Bybit)
 MARGIN_MODE = 'isolated'  # 'isolated' or 'cross' margin
 
 # Liquidation protection
-LIQUIDATION_THRESHOLD = 0.20  # Emergency reduce when within 20% of liquidation
+# Threshold is a fraction of the total liquidation distance (1/leverage).
+# At 50x leverage, liq distance ~2%. A threshold of 0.50 means trigger at
+# 50% of that distance (i.e., within ~1% of liq price at 50x).
+LIQUIDATION_THRESHOLD = 0.50  # Emergency reduce when within 50% of liq distance
 EMERGENCY_REDUCE_RATIO = 0.5  # Reduce position by 50% when approaching liquidation
 
 # Bybit futures symbol

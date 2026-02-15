@@ -82,6 +82,8 @@ from strategies.avellaneda_stoikov.config import (
     EMERGENCY_REDUCE_RATIO,
     BYBIT_MIN_ORDER_SIZE,
     BYBIT_LOT_SIZE,
+    INVENTORY_MAX_HOLD_SECONDS,
+    INVENTORY_MAX_UNREALIZED_LOSS,
 )
 
 
@@ -290,6 +292,15 @@ class LiveTrader:
 
         # Futures-specific: Position tracking
         self.position: Optional[Dict] = None  # {'size', 'side', 'entry_price', 'liq_price'}
+
+        # PnL tracking for round-trip trades
+        self._avg_entry_price: float = 0.0  # Weighted average entry price for current side
+        self._realized_pnl: float = 0.0     # Cumulative realized PnL from closed trades
+        self._closed_trades: int = 0         # Number of round-trip closes
+
+        # Inventory health tracking
+        self._inventory_start_time: float = 0.0  # When inventory became non-zero
+        self._last_inventory_reduce: float = 0.0  # Debounce for inventory reduction
 
         # Threading
         self._stop_event = threading.Event()
@@ -579,18 +590,25 @@ class LiveTrader:
         }
         self.state.inventory = size
 
-        # Calculate distance to liquidation
+        # Calculate distance to liquidation (leverage-relative)
         if liq_price > 0:
             if self.position['side'] == 'long':
                 distance_pct = (current_price - liq_price) / current_price
             else:  # short
                 distance_pct = (liq_price - current_price) / current_price
 
-            # Emergency position reduction if approaching liquidation
-            if distance_pct < LIQUIDATION_THRESHOLD:
+            # Max possible distance to liquidation is ~1/leverage
+            max_liq_distance = 1.0 / self.leverage if self.leverage > 0 else 1.0
+            # How much of our safety margin have we consumed?
+            # fraction_used = 1.0 means at liq price, 0.0 means max distance
+            fraction_remaining = distance_pct / max_liq_distance if max_liq_distance > 0 else 1.0
+
+            # Emergency position reduction if remaining fraction is below threshold
+            if fraction_remaining < LIQUIDATION_THRESHOLD:
                 print(
                     f"⚠️ APPROACHING LIQUIDATION: {distance_pct:.1%} from liq price "
-                    f"${liq_price:.2f}. Reducing position..."
+                    f"${liq_price:.2f} ({fraction_remaining:.0%} of safety margin). "
+                    f"Reducing position..."
                 )
                 self._emergency_reduce_position()
 
@@ -619,7 +637,16 @@ class LiveTrader:
         # Place market order to reduce position
         try:
             side = 'sell' if self.position['side'] == 'long' else 'buy'
-            print(f"Emergency {side} {reduce_amount:.6f} BTC at market")
+            if side == 'buy':
+                print(
+                    f"{Colors.GREEN}{Colors.BOLD}🟢 [{datetime.now().strftime('%H:%M:%S')}] "
+                    f"MARKET BUY (emergency): {reduce_amount:.6f} BTC{Colors.RESET}"
+                )
+            else:
+                print(
+                    f"{Colors.RED}{Colors.BOLD}🔴 [{datetime.now().strftime('%H:%M:%S')}] "
+                    f"MARKET SELL (emergency): {reduce_amount:.6f} BTC{Colors.RESET}"
+                )
 
             if not self.dry_run:
                 self.client.place_order(
@@ -641,6 +668,103 @@ class LiveTrader:
 
         except Exception as e:
             print(f"Error reducing position: {e}")
+
+    def _check_inventory_health(self):
+        """Actively reduce inventory that is stale or losing money.
+
+        Two triggers:
+        1. Time-based: if holding inventory > INVENTORY_MAX_HOLD_SECONDS, reduce
+        2. Loss-based: if unrealized loss exceeds INVENTORY_MAX_UNREALIZED_LOSS × capital, flatten
+        """
+        inv = self.state.inventory
+        if abs(inv) < 1e-8:
+            # No inventory — reset timer
+            self._inventory_start_time = 0.0
+            return
+
+        now = time.time()
+
+        # Start the clock if not already ticking
+        if self._inventory_start_time == 0.0:
+            self._inventory_start_time = now
+
+        # Debounce: don't reduce more than once per 30 seconds
+        if self._last_inventory_reduce > 0 and (now - self._last_inventory_reduce) < 30.0:
+            return
+
+        # Calculate unrealized PnL on current inventory
+        if self._avg_entry_price > 0 and self.state.current_price > 0:
+            if inv > 0:
+                unrealized = (self.state.current_price - self._avg_entry_price) * inv
+            else:
+                unrealized = (self._avg_entry_price - self.state.current_price) * abs(inv)
+        else:
+            unrealized = 0.0
+
+        loss_threshold = self.initial_capital * INVENTORY_MAX_UNREALIZED_LOSS
+        hold_time = now - self._inventory_start_time if self._inventory_start_time > 0 else 0.0
+        should_reduce = False
+        reason = ""
+
+        # Trigger 1: Unrealized loss exceeds threshold
+        if unrealized < -loss_threshold:
+            should_reduce = True
+            reason = f"unrealized loss ${unrealized:,.2f} exceeds -${loss_threshold:,.2f} threshold"
+
+        # Trigger 2: Held too long
+        if hold_time > INVENTORY_MAX_HOLD_SECONDS:
+            should_reduce = True
+            reason = f"inventory held {hold_time:.0f}s (max {INVENTORY_MAX_HOLD_SECONDS}s)"
+
+        if not should_reduce:
+            return
+
+        # Reduce entire inventory via market order
+        reduce_qty = abs(inv)
+        if self.use_futures:
+            reduce_qty = math.floor(reduce_qty / BYBIT_LOT_SIZE) * BYBIT_LOT_SIZE
+            if reduce_qty < BYBIT_MIN_ORDER_SIZE:
+                return
+
+        side = 'sell' if inv > 0 else 'buy'
+        color = Colors.GREEN if side == 'buy' else Colors.RED
+        emoji = "🟢" if side == 'buy' else "🔴"
+        timestamp = datetime.now().strftime('%H:%M:%S')
+
+        print(
+            f"{Colors.YELLOW}{Colors.BOLD}⚠️ [{timestamp}] INVENTORY REDUCTION: "
+            f"{reason}{Colors.RESET}"
+        )
+        print(
+            f"{color}{Colors.BOLD}{emoji} [{timestamp}] MARKET {side.upper()} "
+            f"(inventory reduction): {reduce_qty:.6f} BTC{Colors.RESET}"
+        )
+
+        try:
+            if not self.dry_run:
+                self.client.place_order(
+                    symbol=self.symbol,
+                    side=side,
+                    amount=reduce_qty,
+                    order_type='market',
+                )
+            else:
+                # Simulate immediate fill at current price
+                current_price = self.state.current_price
+                if hasattr(self.client, '_execute_fill'):
+                    order = {
+                        'side': side,
+                        'amount': reduce_qty,
+                        'price': current_price,
+                    }
+                    self.client._execute_fill(order, current_price)
+
+            self._last_inventory_reduce = now
+            # Reset hold timer after reduction
+            self._inventory_start_time = time.time()
+
+        except Exception as e:
+            print(f"{Colors.RED}Error reducing inventory: {e}{Colors.RESET}")
 
     def _calculate_quotes(self) -> tuple:
         """Calculate optimal bid/ask quotes with Phase 2 enhancements."""
@@ -797,6 +921,10 @@ class LiveTrader:
                 )
                 self.state.bid_order_id = bid_result.get("orderId")
                 self.state.bid_price = bid
+                print(
+                    f"{Colors.GREEN}🟢 [{datetime.now().strftime('%H:%M:%S')}] "
+                    f"LIMIT BUY placed: {self.order_size:.6f} BTC @ ${bid:,.2f}{Colors.RESET}"
+                )
             else:
                 self.state.bid_price = bid
                 print(
@@ -813,6 +941,10 @@ class LiveTrader:
                 )
                 self.state.ask_order_id = ask_result.get("orderId")
                 self.state.ask_price = ask
+                print(
+                    f"{Colors.RED}🔴 [{datetime.now().strftime('%H:%M:%S')}] "
+                    f"LIMIT SELL placed: {self.order_size:.6f} BTC @ ${ask:,.2f}{Colors.RESET}"
+                )
             else:
                 self.state.ask_price = ask
                 print(
@@ -838,6 +970,82 @@ class LiveTrader:
             self.state.ask_order_id = None
         except Exception as e:
             self.state.errors.append(f"Cancel error: {e}")
+
+    def _process_trade_pnl(self, fill_side: str, qty: float, price: float, fee: float):
+        """Track entry prices and report PnL when round-trip trades close."""
+        timestamp = datetime.now().strftime('%H:%M:%S')
+
+        # Reconstruct inventory BEFORE this fill was applied
+        if fill_side == 'buy':
+            prev_inv = self.state.inventory - qty
+        else:
+            prev_inv = self.state.inventory + qty
+
+        # Determine if this fill increases or decreases position size
+        is_increasing = (
+            (fill_side == 'buy' and prev_inv >= 0) or
+            (fill_side == 'sell' and prev_inv <= 0)
+        )
+
+        if is_increasing:
+            # Entry fill: update weighted average entry price
+            old_qty = abs(prev_inv)
+            if old_qty + qty > 0:
+                self._avg_entry_price = (
+                    (self._avg_entry_price * old_qty + price * qty)
+                    / (old_qty + qty)
+                )
+            else:
+                self._avg_entry_price = price
+        else:
+            # Closing/reducing fill: calculate realized PnL
+            if self._avg_entry_price > 0:
+                close_qty = min(qty, abs(prev_inv))
+
+                if prev_inv > 0:  # Was long, selling to close
+                    pnl = (price - self._avg_entry_price) * close_qty - fee
+                    direction = (
+                        f"bought @ ${self._avg_entry_price:,.2f} → "
+                        f"sold @ ${price:,.2f}"
+                    )
+                else:  # Was short, buying to close
+                    pnl = (self._avg_entry_price - price) * close_qty - fee
+                    direction = (
+                        f"sold @ ${self._avg_entry_price:,.2f} → "
+                        f"bought @ ${price:,.2f}"
+                    )
+
+                self._realized_pnl += pnl
+                self._closed_trades += 1
+
+                if pnl >= 0:
+                    print(
+                        f"{Colors.GREEN}💰 [{timestamp}] TRADE CLOSED: "
+                        f"+${pnl:.2f} ({direction}){Colors.RESET}"
+                    )
+                else:
+                    print(
+                        f"{Colors.RED}💸 [{timestamp}] TRADE CLOSED: "
+                        f"-${abs(pnl):.2f} ({direction}){Colors.RESET}"
+                    )
+
+                # If fill flipped position to other side, record remainder as new entry
+                remainder = qty - close_qty
+                if remainder > 0:
+                    self._avg_entry_price = price
+
+        # Running PnL summary (compute inline since total_pnl updates after _check_fills)
+        running_pnl = (
+            self.state.cash
+            + self.state.inventory * self.state.current_price
+            - self.initial_capital
+        )
+        pnl_color = Colors.GREEN if running_pnl >= 0 else Colors.RED
+        print(
+            f"{pnl_color}📈 [{timestamp}] Running PnL: ${running_pnl:,.2f} | "
+            f"Trades: {self.state.trades_count} | "
+            f"Fees: ${self.state.total_fees:.2f}{Colors.RESET}"
+        )
 
     def _check_fills(self):
         """Check for order fills and update state."""
@@ -876,6 +1084,10 @@ class LiveTrader:
                         self.state.trades_count += 1
                         self._last_fill_time = time.time()
 
+                        # Reset inventory hold timer when inventory crosses zero
+                        if abs(self.state.inventory) < 1e-8:
+                            self._inventory_start_time = 0.0
+
                         # Track fill side for imbalance detection
                         fill_side = 'buy' if side.lower() in ('buy', 'b') else 'sell'
                         self._recent_fills.append(fill_side)
@@ -890,6 +1102,9 @@ class LiveTrader:
                             f"{qty:.6f} BTC @ ${price:.2f} | Fee: ${fee:.4f} | "
                             f"Inventory: {self.state.inventory:+.6f} BTC{Colors.RESET}"
                         )
+
+                        # Per-trade PnL reporting
+                        self._process_trade_pnl(fill_side, qty, price, fee)
             else:
                 # In live mode, check order history
                 orders = self.client.get_order_history(self.symbol, limit=10)
@@ -919,6 +1134,10 @@ class LiveTrader:
                         self.state.trades_count += 1
                         self._last_fill_time = time.time()
 
+                        # Reset inventory hold timer when inventory crosses zero
+                        if abs(self.state.inventory) < 1e-8:
+                            self._inventory_start_time = 0.0
+
                         # Track fill side for imbalance detection
                         fill_side = 'buy' if side.lower() in ('buy', 'b') else 'sell'
                         self._recent_fills.append(fill_side)
@@ -933,6 +1152,9 @@ class LiveTrader:
                             f"{qty:.6f} BTC @ ${price:.2f} | Fee: ${fee:.4f} | "
                             f"Inventory: {self.state.inventory:+.6f} BTC{Colors.RESET}"
                         )
+
+                        # Per-trade PnL reporting
+                        self._process_trade_pnl(fill_side, qty, price, fee)
 
         except Exception as e:
             self.state.errors.append(f"Fill check error: {e}")
@@ -958,8 +1180,9 @@ class LiveTrader:
                     self._stop_event.wait(self.quote_interval)
                     continue
 
-                self._update_quotes()
                 self._check_fills()
+                self._check_inventory_health()
+                self._update_quotes()
 
                 # Futures: Check liquidation
                 if self.use_futures:
@@ -1032,6 +1255,8 @@ class LiveTrader:
               f"inv_limit={INVENTORY_SOFT_LIMIT}/{INVENTORY_HARD_LIMIT}× | "
               f"cooldown={FILL_COOLDOWN_SECONDS}s | "
               f"disp_guard={DISPLACEMENT_THRESHOLD:.1%}")
+        print(f"Inv Health:     max_hold={INVENTORY_MAX_HOLD_SECONDS}s | "
+              f"max_loss={INVENTORY_MAX_UNREALIZED_LOSS:.1%} of capital")
 
         # Phase 2 features summary
         phase2_features = []
@@ -1083,6 +1308,7 @@ class LiveTrader:
         print(f"Final Inventory: {self.state.inventory:.6f} BTC")
         print(f"Final Cash:      ${self.state.cash:,.2f}")
         print(f"Total P&L:       ${self.state.total_pnl:,.2f}")
+        print(f"Realized P&L:    ${self._realized_pnl:,.2f} ({self._closed_trades} round-trips)")
         print(f"Total Fees:      ${self.state.total_fees:,.4f}")
         print(f"Total Trades:    {self.state.trades_count}")
         print(f"Ticks Rejected:  {self._tick_rejection_count}")
