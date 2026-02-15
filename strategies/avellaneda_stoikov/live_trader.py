@@ -302,6 +302,11 @@ class LiveTrader:
         self._inventory_start_time: float = 0.0  # When inventory became non-zero
         self._last_inventory_reduce: float = 0.0  # Debounce for inventory reduction
 
+        # Log cooldown tracking (suppress spammy logs to once per 60s)
+        self._last_asymmetric_state: Optional[str] = None
+        self._last_asymmetric_log_time: float = 0.0
+        self._last_displacement_log_time: float = 0.0
+
         # Threading
         self._stop_event = threading.Event()
         self._quote_thread: Optional[threading.Thread] = None
@@ -660,11 +665,53 @@ class LiveTrader:
                 current_price = self.state.current_price
                 if hasattr(self.client, '_execute_fill'):
                     order = {
+                        'orderId': f'emergency-{int(time.time())}',
                         'side': side,
                         'amount': reduce_amount,
-                        'price': current_price
+                        'price': current_price,
                     }
                     self.client._execute_fill(order, current_price)
+
+                    # Sync LiveTrader state with the fill
+                    notional = reduce_amount * current_price
+                    fee = self.fee_model.maker_fee(notional)
+                    self.state.total_fees += fee
+
+                    if side == 'buy':
+                        self.state.inventory += reduce_amount
+                        self.state.cash -= notional + fee
+                    else:
+                        self.state.inventory -= reduce_amount
+                        self.state.cash += notional - fee
+
+                    self.state.trades_count += 1
+                    self._last_fill_time = time.time()
+
+                    if abs(self.state.inventory) < 1e-8:
+                        self._inventory_start_time = 0.0
+
+                    # Track fill side for imbalance detection
+                    self._recent_fills.append(side)
+                    if len(self._recent_fills) > FILL_IMBALANCE_WINDOW * 2:
+                        self._recent_fills = self._recent_fills[-FILL_IMBALANCE_WINDOW * 2:]
+
+                    # Color-coded fill logging
+                    ts = datetime.now().strftime('%H:%M:%S')
+                    fill_color = Colors.GREEN if side == 'buy' else Colors.RED
+                    fill_emoji = "🟢" if side == 'buy' else "🔴"
+                    print(
+                        f"{fill_color}{Colors.BOLD}{fill_emoji} [{ts}] FILL: {side.upper()} "
+                        f"{reduce_amount:.6f} BTC @ ${current_price:.2f} | Fee: ${fee:.4f} | "
+                        f"Inventory: {self.state.inventory:+.6f} BTC{Colors.RESET}"
+                    )
+
+                    # Per-trade PnL reporting
+                    self._process_trade_pnl(side, reduce_amount, current_price, fee)
+
+            # Cancel stale limit orders and force fresh re-quoting
+            self._cancel_all_orders()
+            self.state.bid_price = None
+            self.state.ask_price = None
 
         except Exception as e:
             print(f"Error reducing position: {e}")
@@ -740,6 +787,8 @@ class LiveTrader:
             f"(inventory reduction): {reduce_qty:.6f} BTC{Colors.RESET}"
         )
 
+        self._last_inventory_reduce = now
+
         try:
             if not self.dry_run:
                 self.client.place_order(
@@ -753,13 +802,56 @@ class LiveTrader:
                 current_price = self.state.current_price
                 if hasattr(self.client, '_execute_fill'):
                     order = {
+                        'orderId': f'inv-reduce-{int(now)}',
                         'side': side,
                         'amount': reduce_qty,
                         'price': current_price,
                     }
                     self.client._execute_fill(order, current_price)
 
-            self._last_inventory_reduce = now
+                    # Sync LiveTrader state with the fill
+                    notional = reduce_qty * current_price
+                    fee = self.fee_model.maker_fee(notional)
+                    self.state.total_fees += fee
+
+                    if side == 'buy':
+                        self.state.inventory += reduce_qty
+                        self.state.cash -= notional + fee
+                    else:
+                        self.state.inventory -= reduce_qty
+                        self.state.cash += notional - fee
+
+                    self.state.trades_count += 1
+                    self._last_fill_time = time.time()
+
+                    if abs(self.state.inventory) < 1e-8:
+                        self._inventory_start_time = 0.0
+
+                    # Track fill side for imbalance detection
+                    self._recent_fills.append(side)
+                    if len(self._recent_fills) > FILL_IMBALANCE_WINDOW * 2:
+                        self._recent_fills = self._recent_fills[-FILL_IMBALANCE_WINDOW * 2:]
+
+                    # Color-coded fill logging
+                    fill_color = Colors.GREEN if side == 'buy' else Colors.RED
+                    fill_emoji = "🟢" if side == 'buy' else "🔴"
+                    print(
+                        f"{fill_color}{Colors.BOLD}{fill_emoji} [{timestamp}] FILL: {side.upper()} "
+                        f"{reduce_qty:.6f} BTC @ ${current_price:.2f} | Fee: ${fee:.4f} | "
+                        f"Inventory: {self.state.inventory:+.6f} BTC{Colors.RESET}"
+                    )
+
+                    # Per-trade PnL reporting
+                    self._process_trade_pnl(side, reduce_qty, current_price, fee)
+
+            # Cancel stale limit orders and force fresh re-quoting.
+            # Without this, old order IDs remain in state, _update_quotes()
+            # sees no_orders=False and skips re-quoting — causing long fill
+            # gaps where only inventory reductions fire.
+            self._cancel_all_orders()
+            self.state.bid_price = None
+            self.state.ask_price = None
+
             # Reset hold timer after reduction
             self._inventory_start_time = time.time()
 
@@ -802,10 +894,13 @@ class LiveTrader:
         disp_mult = self._calculate_displacement_multiplier()
         if disp_mult > 1.0:
             half_spread *= disp_mult
-            print(
-                f"[{datetime.now()}] DISPLACEMENT GUARD: "
-                f"spread widened {disp_mult:.1f}×"
-            )
+            now = time.time()
+            if now - self._last_displacement_log_time > 60:
+                print(
+                    f"[{datetime.now()}] DISPLACEMENT GUARD: "
+                    f"spread widened {disp_mult:.1f}×"
+                )
+                self._last_displacement_log_time = now
 
         # Phase 2: Asymmetric spreads - widen unfavorable side during trends
         if ASYMMETRIC_SPREADS_ENABLED:
@@ -814,17 +909,28 @@ class LiveTrader:
                 if momentum > 0:  # Uptrend: widen ask
                     ask_adjustment = ASYMMETRY_AGGRESSION
                     bid_adjustment = 1.0
-                    print(f"[{datetime.now()}] ASYMMETRIC: uptrend detected, widening ask")
+                    new_asym = 'uptrend'
                 else:  # Downtrend: widen bid
                     ask_adjustment = 1.0
                     bid_adjustment = ASYMMETRY_AGGRESSION
-                    print(f"[{datetime.now()}] ASYMMETRIC: downtrend detected, widening bid")
+                    new_asym = 'downtrend'
+
+                # Only log on state change with 60s cooldown
+                if new_asym != self._last_asymmetric_state:
+                    now = time.time()
+                    if now - self._last_asymmetric_log_time > 60:
+                        side_str = 'ask' if new_asym == 'uptrend' else 'bid'
+                        print(f"[{datetime.now().strftime('%H:%M:%S')}] ASYMMETRIC: {new_asym} detected, widening {side_str}")
+                        self._last_asymmetric_log_time = now
+                    self._last_asymmetric_state = new_asym
 
                 bid = mid - half_spread * bid_adjustment
                 ask = mid + half_spread * ask_adjustment
             else:
                 bid = mid - half_spread
                 ask = mid + half_spread
+                if self._last_asymmetric_state is not None:
+                    self._last_asymmetric_state = None
         else:
             bid = mid - half_spread
             ask = mid + half_spread
@@ -893,13 +999,18 @@ class LiveTrader:
                 elif inv < 0 and abs(inv) >= q_hard:
                     skip_sell = True
 
-            # Check if quotes changed significantly (> 0.1%)
+            # Check if quotes changed significantly or no orders on book
+            # Threshold: 1 bps (0.01%) — must be tighter than half-spread to keep
+            # orders near the market. At 5 bps spread, half-spread is ~2.5 bps.
             should_update = False
-            if self.state.bid_price is None or self.state.ask_price is None:
+            no_orders = (self.state.bid_order_id is None and self.state.ask_order_id is None)
+            if no_orders:
+                should_update = True  # Always re-quote when no orders are active
+            elif self.state.bid_price is None or self.state.ask_price is None:
                 should_update = True
-            elif abs(bid - self.state.bid_price) / self.state.bid_price > 0.001:
+            elif abs(bid - self.state.bid_price) / self.state.bid_price > 0.0001:
                 should_update = True
-            elif abs(ask - self.state.ask_price) / self.state.ask_price > 0.001:
+            elif abs(ask - self.state.ask_price) / self.state.ask_price > 0.0001:
                 should_update = True
 
             if not should_update:

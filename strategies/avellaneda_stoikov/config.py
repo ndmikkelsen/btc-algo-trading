@@ -78,7 +78,7 @@ ORDER_SIZE = 0.001  # 0.001 BTC
 # =============================================================================
 
 # How often to update quotes (in seconds)
-QUOTE_REFRESH_INTERVAL = 1.0
+QUOTE_REFRESH_INTERVAL = 1
 
 # Cancel orders if price moves more than this (as decimal)
 PRICE_TOLERANCE = 0.002
@@ -145,7 +145,7 @@ INVENTORY_SOFT_LIMIT = 2   # start reducing order size
 INVENTORY_HARD_LIMIT = 3   # stop accumulating, reduce-only
 
 # Active inventory reduction
-INVENTORY_MAX_HOLD_SECONDS = 300  # 5 min: force-reduce stale inventory
+INVENTORY_MAX_HOLD_SECONDS = 900  # 15 min: force-reduce stale inventory
 INVENTORY_MAX_UNREALIZED_LOSS = 0.002  # 0.2% of capital: flatten if exceeded
 
 # Post-fill cooldown
