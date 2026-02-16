@@ -10,6 +10,22 @@ kanban-plugin: board
 
 ## Low Priority - #p2
 
+- [ ] Tune quote update threshold for low-volatility markets #p2
+  > Branch: fix/position-reduce
+  >
+  > During live trading, the bot only updated quotes once in 5+ minutes because the should_update threshold (0.1% change) is too tight for the 5-second polling interval.
+  >
+  > In _update_quotes() (live_trader.py:740-743):
+  >   elif abs(bid - self.state.bid_price) / self.state.bid_price > 0.001:
+  >
+  > In a calm market, BTC needs to move ~$70 between polls to trigger a requote. Orders sit at stale prices for extended periods.
+  >
+  > Options:
+  > 1. Lower threshold (e.g., 0.0005 = 5bps)
+  > 2. Add a time-based requote (e.g., always update every 60s)
+  > 3. Hybrid: time OR price threshold
+  >
+  > Impact: Bot misses fills when market moves gradually.
 - [ ] Complete stat_arb model implementation #p2
   > Branch: algo-imp
   >
@@ -52,32 +68,6 @@ kanban-plugin: board
   > - Max position size limits
   > - Daily loss limits
   > - Automatic shutdown on anomalies
-
-## High Priority - #p0
-
-## In Progress
-
-- [ ] Resume live trading with fixed emergency position reduction #p1
-  > Resume live trading with fixed emergency position reduction system.
-  >
-  > FIXES COMPLETED:
-  > ✅ commit b3b08c2 — Emergency reduce robustness (config constants, lot-size rounding, client validation)
-  > ✅ commit f7af538 — Systemic fix (order_size correction, inventory limits, startup warning)
-  >
-  > BEFORE GOING LIVE:
-  > 1. ⚠️ Manually close pre-existing 0.029 BTC SHORT position on Bybit (btc-algo-trading-q6s)
-  > 2. Run /run-live --order-pct 4.0 --capital 500
-  > 3. Monitor for 1+ hour to validate:
-  >    - No 'Error reducing position' spam
-  >    - Inventory limits trigger at correct points (3 and 5 fills)
-  >    - Bot maintains balanced position (not one-sided)
-  >    - Profitability checks work correctly
-  >
-  > Both systemic issues fixed:
-  > - Liquidation protection now works (closes position instead of error loop)
-  > - Bot won't go one-sided after 1 fill (inventory limits corrected)
-  > - Order sizing transparent ( notional, not misleading )
-  > - Client-side validation prevents future violations
 - [ ] Run A-S paper trading on Bybit testnet #p1
   > Validate Avellaneda-Stoikov strategy in live market conditions using Bybit testnet paper trading.
   >
@@ -91,6 +81,10 @@ kanban-plugin: board
   > - scripts/run_paper_trader.py
   > - strategies/avellaneda_stoikov/live_trader.py
   > - config_hft.py settings
+
+## High Priority - #p0
+
+## In Progress
 
 ## Done
 
@@ -115,6 +109,30 @@ kanban-plugin: board
   > 1. Verify position shows 0.000 BTC on Bybit
   > 2. Run btc-algo-trading-iib (resume live trading)
   > 3. Monitor for systemic fix validation
+- [x] Investigate 90-min dry spell between fills #p1
+- [x] Fix PnL tracking desync after inventory reductions #p1
+- [x] Add colored trade reporting and per-trade PnL display #p1
+- [x] Resume live trading with fixed emergency position reduction #p1
+  > Resume live trading with fixed emergency position reduction system.
+  >
+  > FIXES COMPLETED:
+  > ✅ commit b3b08c2 — Emergency reduce robustness (config constants, lot-size rounding, client validation)
+  > ✅ commit f7af538 — Systemic fix (order_size correction, inventory limits, startup warning)
+  >
+  > BEFORE GOING LIVE:
+  > 1. ⚠️ Manually close pre-existing 0.029 BTC SHORT position on Bybit (btc-algo-trading-q6s)
+  > 2. Run /run-live --order-pct 4.0 --capital 500
+  > 3. Monitor for 1+ hour to validate:
+  >    - No 'Error reducing position' spam
+  >    - Inventory limits trigger at correct points (3 and 5 fills)
+  >    - Bot maintains balanced position (not one-sided)
+  >    - Profitability checks work correctly
+  >
+  > Both systemic issues fixed:
+  > - Liquidation protection now works (closes position instead of error loop)
+  > - Bot won't go one-sided after 1 fill (inventory limits corrected)
+  > - Order sizing transparent ( notional, not misleading )
+  > - Client-side validation prevents future violations
 - [x] Backtest BTCMomentumScalper strategy #p1
 - [x] Download Binance BTC/USDT data (2017-present) #p1
 - [x] Verify backtesting works with sample data #p1
@@ -123,6 +141,7 @@ kanban-plugin: board
 - [x] Backtesting Pipeline Setup #p1
 - [x] Configure Cognee knowledge base for btc-algo-trading #p1
   > Set up isolated Cognee stack with unique ports, update all scripts and documentation to use btc-specific datasets and configuration.
+- [x] Suppress asymmetric spread log noise #p2
 - [x] Document backtesting findings #p2
 - [x] Analyze performance by market regime #p2
 - [x] Merge datasets into unified format #p2
