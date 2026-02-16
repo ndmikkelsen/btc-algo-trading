@@ -69,34 +69,61 @@ class TestPriceUpdates:
 class TestOrderFillSimulation:
     """Tests for simulating order fills."""
 
-    def test_bid_fills_when_low_touches_price(self):
-        """Bid order fills when candle low touches bid price."""
+    def test_bid_fills_when_low_trades_through_price(self):
+        """Bid order fills when candle low trades through bid price (strict <)."""
         model = AvellanedaStoikov()
         manager = OrderManager(initial_cash=100000.0)
-        simulator = MarketSimulator(model, manager)
+        # High fill_aggressiveness + seed for deterministic fill
+        simulator = MarketSimulator(
+            model, manager,
+            fill_aggressiveness=100.0,  # Ensure fill on deep penetration
+            random_seed=42,
+        )
 
         # Place a bid at 49900
         bid = manager.place_order(OrderSide.BUY, 49900.0, 0.001)
 
-        # Price drops to touch the bid
-        fills = simulator.check_fills(high=50100.0, low=49850.0)
+        # Price drops well THROUGH the bid for high fill probability
+        fills = simulator.check_fills(high=50100.0, low=49500.0, open_price=50000.0)
 
         assert len(fills) == 1
         assert fills[0]['order_id'] == bid.order_id
         assert fills[0]['side'] == OrderSide.BUY
 
-    def test_ask_fills_when_high_touches_price(self):
-        """Ask order fills when candle high touches ask price."""
+    def test_bid_does_not_fill_when_low_equals_price(self):
+        """Bid does NOT fill when low merely touches (equals) bid price."""
         model = AvellanedaStoikov()
         manager = OrderManager(initial_cash=100000.0)
-        simulator = MarketSimulator(model, manager)
+        simulator = MarketSimulator(
+            model, manager,
+            fill_aggressiveness=100.0,
+            random_seed=42,
+        )
+
+        # Place a bid at 49900
+        manager.place_order(OrderSide.BUY, 49900.0, 0.001)
+
+        # Low exactly equals bid — should NOT fill (strict <)
+        fills = simulator.check_fills(high=50100.0, low=49900.0, open_price=50000.0)
+
+        assert len(fills) == 0
+
+    def test_ask_fills_when_high_trades_through_price(self):
+        """Ask order fills when candle high trades through ask price (strict >)."""
+        model = AvellanedaStoikov()
+        manager = OrderManager(initial_cash=100000.0)
+        simulator = MarketSimulator(
+            model, manager,
+            fill_aggressiveness=100.0,
+            random_seed=42,
+        )
         manager.inventory = 0.01  # Have inventory to sell
 
         # Place an ask at 50100
         ask = manager.place_order(OrderSide.SELL, 50100.0, 0.001)
 
-        # Price rises to touch the ask
-        fills = simulator.check_fills(high=50150.0, low=49900.0)
+        # Price rises well THROUGH the ask for high fill probability
+        fills = simulator.check_fills(high=50500.0, low=49900.0, open_price=50000.0)
 
         assert len(fills) == 1
         assert fills[0]['order_id'] == ask.order_id
@@ -106,31 +133,36 @@ class TestOrderFillSimulation:
         """Order doesn't fill if price doesn't reach it."""
         model = AvellanedaStoikov()
         manager = OrderManager(initial_cash=100000.0)
-        simulator = MarketSimulator(model, manager)
+        simulator = MarketSimulator(model, manager, random_seed=42)
 
         # Place a bid at 49000 (far below current price)
         manager.place_order(OrderSide.BUY, 49000.0, 0.001)
 
         # Price stays above bid
-        fills = simulator.check_fills(high=50100.0, low=49900.0)
+        fills = simulator.check_fills(high=50100.0, low=49900.0, open_price=50000.0)
 
         assert len(fills) == 0
 
-    def test_both_sides_can_fill_in_volatile_candle(self):
-        """Both bid and ask can fill in a large candle."""
+    def test_only_one_side_fills_in_volatile_candle(self):
+        """Only one side fills per candle even if range covers both orders."""
         model = AvellanedaStoikov()
         manager = OrderManager(initial_cash=100000.0)
-        simulator = MarketSimulator(model, manager)
+        simulator = MarketSimulator(
+            model, manager,
+            fill_aggressiveness=100.0,
+            random_seed=42,
+        )
         manager.inventory = 0.01
 
         # Place orders on both sides
-        bid = manager.place_order(OrderSide.BUY, 49900.0, 0.001)
-        ask = manager.place_order(OrderSide.SELL, 50100.0, 0.001)
+        manager.place_order(OrderSide.BUY, 49900.0, 0.001)
+        manager.place_order(OrderSide.SELL, 50100.0, 0.001)
 
-        # Large candle touches both
-        fills = simulator.check_fills(high=50200.0, low=49800.0)
+        # Large candle trades through both levels
+        fills = simulator.check_fills(high=50200.0, low=49800.0, open_price=50000.0)
 
-        assert len(fills) == 2
+        # CRITICAL: Only ONE side should fill per candle (anti double-fill bias)
+        assert len(fills) == 1
 
 
 class TestQuoteUpdates:

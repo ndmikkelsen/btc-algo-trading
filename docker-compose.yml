@@ -1,0 +1,61 @@
+# A-S / GLFT Market Making Trader (MEXC)
+#
+# Usage:
+#   docker compose up -d          # Start trader (dry-run)
+#   docker compose logs -f        # Follow logs
+#   docker compose down           # Stop trader
+#
+# Note: The Cognee stack lives at .claude/docker/docker-compose.yml
+#       and uses a separate project name (btc-algo-cognee). No conflicts.
+
+services:
+  trader:
+    container_name: btc-algo-trader
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      - MEXC_API_KEY=${MEXC_API_KEY}
+      - MEXC_API_SECRET=${MEXC_API_SECRET}
+      - DRY_RUN=${DRY_RUN:-true}
+      - TRADING_MODEL=${TRADING_MODEL:-glft}
+      - FEE_TIER=${FEE_TIER:-regular}
+      - KAPPA_MODE=${KAPPA_MODE:-live}
+      - INITIAL_CAPITAL=${INITIAL_CAPITAL:-1000}
+      - ORDER_SIZE=${ORDER_SIZE:-0.003}
+      - QUOTE_INTERVAL=${QUOTE_INTERVAL:-5.0}
+      - DATABASE_URL=postgresql://trader:${TRADER_DB_PASSWORD:-trader}@trader-db:5432/trader
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      trader-db:
+        condition: service_healthy
+
+  trader-db:
+    container_name: btc-algo-trader-db
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: trader
+      POSTGRES_PASSWORD: ${TRADER_DB_PASSWORD:-trader}
+      POSTGRES_DB: trader
+    volumes:
+      - trader-db-data:/var/lib/postgresql/data
+    ports:
+      - "5437:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trader"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  trader-db-data:

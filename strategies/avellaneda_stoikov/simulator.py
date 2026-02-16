@@ -7,13 +7,17 @@ Includes regime detection for adaptive position sizing.
 
 import pandas as pd
 import numpy as np
+import random
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
-from strategies.avellaneda_stoikov.model import AvellanedaStoikov
+from strategies.avellaneda_stoikov.base_model import MarketMakingModel
 from strategies.avellaneda_stoikov.order_manager import OrderManager, OrderSide
 from strategies.avellaneda_stoikov.regime import RegimeDetector, MarketRegime
-from strategies.avellaneda_stoikov.config import SESSION_LENGTH, ORDER_SIZE
+from strategies.avellaneda_stoikov.config import (
+    SESSION_LENGTH, ORDER_SIZE,
+    FILL_AGGRESSIVENESS, MAX_SLIPPAGE_PCT, STOP_LOSS_PCT,
+)
 
 
 class MarketSimulator:
@@ -36,11 +40,15 @@ class MarketSimulator:
 
     def __init__(
         self,
-        model: AvellanedaStoikov,
+        model: MarketMakingModel,
         order_manager: OrderManager,
         session_length: float = SESSION_LENGTH,
         order_size: float = ORDER_SIZE,
         use_regime_filter: bool = False,
+        fill_aggressiveness: float = FILL_AGGRESSIVENESS,
+        max_slippage_pct: float = MAX_SLIPPAGE_PCT,
+        stop_loss_pct: float = STOP_LOSS_PCT,
+        random_seed: Optional[int] = None,
     ):
         """
         Initialize the market simulator.
@@ -51,11 +59,25 @@ class MarketSimulator:
             session_length: Session length in seconds (default 86400 = 24h)
             order_size: Default order quantity
             use_regime_filter: Enable regime-based position scaling
+            fill_aggressiveness: Controls fill probability (higher = more fills)
+            max_slippage_pct: Maximum slippage as fraction of price
+            stop_loss_pct: Force-close threshold for unrealized loss
+            random_seed: Optional seed for reproducibility
         """
         self.model = model
         self.order_manager = order_manager
         self.session_length = session_length
         self.order_size = order_size
+
+        # Realistic fill model parameters
+        self.fill_aggressiveness = fill_aggressiveness
+        self.max_slippage_pct = max_slippage_pct
+
+        # Stop-loss
+        self.stop_loss_pct = stop_loss_pct
+
+        # RNG for fill probability and slippage
+        self.rng = random.Random(random_seed)
 
         # Regime detection
         self.use_regime_filter = use_regime_filter
@@ -82,6 +104,9 @@ class MarketSimulator:
         self.current_regime: Optional[MarketRegime] = None
         self.regime_history: List[Dict] = []
         self.skipped_candles: int = 0
+
+        # Stop-loss tracking
+        self.stop_loss_events: List[Dict] = []
 
     def update_price(
         self,
@@ -158,49 +183,100 @@ class MarketSimulator:
 
         return self.regime_detector.should_trade()
 
-    def check_fills(self, high: float, low: float) -> List[Dict]:
+    def check_fills(
+        self,
+        high: float,
+        low: float,
+        open_price: float = 0.0,
+    ) -> List[Dict]:
         """
         Check which open orders would fill given price range.
+
+        Implements realistic fill model:
+        - Only ONE side can fill per candle (no double-fill bias)
+        - Price must trade THROUGH the level (strict inequality)
+        - Fill probability based on penetration depth
+        - Random slippage applied to fill price
 
         Args:
             high: Candle high price
             low: Candle low price
+            open_price: Candle open price (used to determine fill priority)
 
         Returns:
             List of fill information dictionaries
         """
         fills = []
+        filled_one_side = False
+
+        # Determine fill priority: if open is closer to high, bids fill first
+        # (price likely went down first then up). Vice versa for asks.
+        bid_orders = []
+        ask_orders = []
 
         for order_id, order in list(self.order_manager.open_orders.items()):
-            filled = False
-            fill_price = order.price
-
             if order.side == OrderSide.BUY:
-                # Bid fills when low touches or goes below bid price
-                if low <= order.price:
-                    filled = True
-                    fill_price = order.price  # Assume fill at limit price
-
+                bid_orders.append((order_id, order))
             elif order.side == OrderSide.SELL:
-                # Ask fills when high touches or goes above ask price
-                if high >= order.price:
-                    filled = True
-                    fill_price = order.price
+                ask_orders.append((order_id, order))
 
-            if filled:
-                # Execute the fill
-                self.order_manager.fill_order(
-                    order_id,
-                    order.quantity,
-                    fill_price,
-                )
-                fills.append({
-                    'order_id': order_id,
-                    'side': order.side,
-                    'price': fill_price,
-                    'quantity': order.quantity,
-                    'timestamp': self.current_time,
-                })
+        # Decide which side to try first based on open price proximity
+        if open_price > 0:
+            open_to_high = high - open_price
+            open_to_low = open_price - low
+            try_bids_first = open_to_low < open_to_high
+        else:
+            try_bids_first = True
+
+        if try_bids_first:
+            ordered_sides = [(bid_orders, 'bid'), (ask_orders, 'ask')]
+        else:
+            ordered_sides = [(ask_orders, 'ask'), (bid_orders, 'bid')]
+
+        for orders, side_label in ordered_sides:
+            if filled_one_side:
+                break
+
+            for order_id, order in orders:
+                if filled_one_side:
+                    break
+
+                fill_price = None
+
+                if order.side == OrderSide.BUY:
+                    # Strict less-than: price must trade THROUGH the level
+                    if low < order.price:
+                        penetration = (order.price - low) / order.price
+                        fill_prob = min(1.0, penetration * self.fill_aggressiveness)
+                        if self.rng.random() < fill_prob:
+                            # Slippage: slight improvement possible for limit buys
+                            slippage = self.rng.uniform(0, self.max_slippage_pct) * order.price
+                            fill_price = order.price - slippage
+
+                elif order.side == OrderSide.SELL:
+                    # Strict greater-than: price must trade THROUGH the level
+                    if high > order.price:
+                        penetration = (high - order.price) / order.price
+                        fill_prob = min(1.0, penetration * self.fill_aggressiveness)
+                        if self.rng.random() < fill_prob:
+                            # Slippage: slight improvement possible for limit sells
+                            slippage = self.rng.uniform(0, self.max_slippage_pct) * order.price
+                            fill_price = order.price + slippage
+
+                if fill_price is not None:
+                    self.order_manager.fill_order(
+                        order_id,
+                        order.quantity,
+                        fill_price,
+                    )
+                    fills.append({
+                        'order_id': order_id,
+                        'side': order.side,
+                        'price': fill_price,
+                        'quantity': order.quantity,
+                        'timestamp': self.current_time,
+                    })
+                    filled_one_side = True
 
         return fills
 
@@ -294,10 +370,13 @@ class MarketSimulator:
             Dictionary with step results
         """
         # Check for fills on existing orders BEFORE updating price
-        fills = self.check_fills(high=high, low=low)
+        fills = self.check_fills(high=high, low=low, open_price=open_price)
 
         # Update price state
         self.update_price(close, high, low, timestamp)
+
+        # Check stop-loss after price update
+        stop_loss_triggered = self._check_stop_loss(close)
 
         # Detect regime if enabled
         regime = self.detect_regime()
@@ -319,6 +398,7 @@ class MarketSimulator:
             'unrealized_pnl': position['unrealized_pnl'],
             'open_orders': len(self.order_manager.open_orders),
             'regime': regime.value if regime else None,
+            'stop_loss_triggered': stop_loss_triggered,
         }
 
         # Track regime changes
@@ -332,6 +412,70 @@ class MarketSimulator:
 
         self.step_results.append(result)
         return result
+
+    def _check_stop_loss(self, current_price: float) -> bool:
+        """
+        Check if stop-loss should be triggered and force-close position.
+
+        Args:
+            current_price: Current close price
+
+        Returns:
+            True if stop-loss was triggered
+        """
+        inventory = self.order_manager.inventory
+        if abs(inventory) < 1e-10:
+            return False
+
+        entry_price = self.order_manager.average_entry_price
+        if entry_price == 0:
+            return False
+
+        # Calculate unrealized loss as percentage
+        if inventory > 0:  # Long position
+            unrealized_pct = (current_price - entry_price) / entry_price
+        else:  # Short position
+            unrealized_pct = (entry_price - current_price) / entry_price
+
+        if unrealized_pct < -self.stop_loss_pct:
+            # Apply slippage to stop-loss exit
+            slippage = self.rng.uniform(0, self.max_slippage_pct) * current_price
+
+            if inventory > 0:
+                # Sell to close long — slippage makes exit price worse
+                exit_price = current_price - slippage
+                # Force-close via order manager
+                order = self.order_manager.place_order(
+                    OrderSide.SELL, exit_price, abs(inventory)
+                )
+                if order:
+                    self.order_manager.fill_order(
+                        order.order_id, abs(inventory), exit_price
+                    )
+            else:
+                # Buy to close short — slippage makes exit price worse
+                exit_price = current_price + slippage
+                order = self.order_manager.place_order(
+                    OrderSide.BUY, exit_price, abs(inventory)
+                )
+                if order:
+                    self.order_manager.fill_order(
+                        order.order_id, abs(inventory), exit_price
+                    )
+
+            # Cancel all open orders after stop-loss
+            self.order_manager.cancel_all_orders()
+
+            self.stop_loss_events.append({
+                'timestamp': self.current_time,
+                'inventory': inventory,
+                'entry_price': entry_price,
+                'exit_price': exit_price if order else current_price,
+                'loss_pct': unrealized_pct,
+            })
+            return True
+
+        return False
 
     def run_backtest(
         self,
@@ -413,6 +557,7 @@ class MarketSimulator:
             'final_cash': self.order_manager.cash,
             'regime_stats': regime_stats,
             'skipped_candles': self.skipped_candles,
+            'stop_loss_events': self.stop_loss_events,
         }
 
     def _calculate_regime_stats(self) -> Dict[str, Any]:
@@ -445,6 +590,8 @@ class MarketSimulator:
         self.current_regime = None
         self.regime_history = []
         self.skipped_candles = 0
+
+        self.stop_loss_events = []
 
         if self.regime_detector:
             self.regime_detector = RegimeDetector()

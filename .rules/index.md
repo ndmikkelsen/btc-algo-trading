@@ -1,10 +1,10 @@
-# Second Brain Rules & Patterns
+# BTC Algo Trading Rules & Patterns
 
-> Technical documentation, architecture patterns, and development guidelines
+> Technical documentation, architecture patterns, and development guidelines for the btc-algo-trading project.
 
 ## Purpose
 
-This directory contains technical documentation for AI agents and developers working on the second-brain knowledge system. These rules are referenced by `.claude/` workflows and indexed by Cognee for semantic search.
+This directory contains technical documentation for AI agents and developers working on Bitcoin algorithmic trading strategies. These rules are referenced by `.claude/` workflows and indexed by Cognee for semantic search.
 
 ## Structure
 
@@ -12,8 +12,6 @@ This directory contains technical documentation for AI agents and developers wor
 
 System design, component relationships, and integration patterns:
 
-- `knowledge-system.md` - Overall knowledge garden architecture
-- `obsidian-integration.md` - Obsidian vault structure and conventions
 - `cognee-integration.md` - AI memory layer integration
 - `constitution-cognee-integration.md` - Constitution framework + Cognee integration
 
@@ -21,6 +19,7 @@ System design, component relationships, and integration patterns:
 
 Reusable solutions and workflows:
 
+- `bdd-workflow.md` - BDD pipeline and Gherkin conventions
 - `beads-integration.md` - Issue tracking with Beads
 - `git-workflow.md` - Git branching and commit conventions
 - `knowledge-capture.md` - How to capture and organize knowledge
@@ -32,35 +31,39 @@ Reusable solutions and workflows:
 Read relevant rules before implementing features:
 
 ```bash
-# Before working on knowledge capture
-Read .rules/patterns/knowledge-capture.md
+# Before creating features (BDD pipeline)
+Read .rules/patterns/bdd-workflow.md
 
 # Before creating issues
 Read .rules/patterns/beads-integration.md
 
-# Before working with Obsidian
-Read .rules/architecture/obsidian-integration.md
+# Before committing/pushing
+Read .rules/patterns/git-workflow.md
+
+# Before working with knowledge system
+Read .rules/architecture/cognee-integration.md
 ```
+
+### For Team Agents
+
+When working as a team agent, read:
+
+1. `.rules/patterns/bdd-workflow.md` - Understand the BDD pipeline
+2. `.rules/patterns/beads-integration.md` - How to track work
+3. `.claude/skills/` - The 4-skill workflow
+4. `AGENTS.md` - Agent conventions
 
 ### For Cognee
 
 These docs are indexed in Cognee datasets:
 
-- `second-brain-constitution` - CONSTITUTION.md, VISION.md, PLAN.md
-- `btc-patterns` - .rules/ pattern docs
-- `knowledge-garden` - .claude/ workflow docs
+- `btc-patterns` - Pattern docs
 - `btc-sessions` - Session history
 
 Query Cognee for context:
 
 ```bash
-# Standard query
-curl -X POST http://localhost:8001/api/v1/search \
-  -H "Content-Type: application/json" \
-  -d '{"query": "How should I capture new patterns?"}'
-
-# Constitution-aware query (via /query --with-values)
-/query --with-values How should I organize my knowledge system?
+/query How does the A-S model handle inventory risk?
 ```
 
 ## Maintenance
@@ -71,13 +74,6 @@ curl -X POST http://localhost:8001/api/v1/search \
 - Update when architecture changes
 - Remove obsolete patterns
 
-## Related Documentation
-
-- [CONSTITUTION.md](../CONSTITUTION.md) - Core values and principles
-- [VISION.md](../VISION.md) - Long-term vision
-- [AGENTS.md](../AGENTS.md) - Quick reference for AI agents
-- [.claude/INDEX.md](../.claude/INDEX.md) - Knowledge garden index
-
 ---
 
-**Last Updated**: 2026-01-26
+**Last Updated**: 2026-02-09

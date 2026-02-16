@@ -1,36 +1,104 @@
-"""Live/Paper trader for Avellaneda-Stoikov strategy.
+"""Live/Paper trader for market making strategies.
 
-Connects to Bybit (testnet or mainnet) and executes the A-S model
-in real-time.
+Supports MEXC spot trading or Bybit futures trading with leverage.
+Executes market making models (GLFT or A-S) with live kappa calibration
+and fee tracking.
+
+Supported exchanges:
+- MEXC spot (use_futures=False): 0% maker fees, good for spot market making
+- Bybit futures (use_futures=True): 50-100x leverage for HFT
+
+Trading modes:
+- dry_run=True (default): real market data, simulated fills locally
+- dry_run=False: real order placement via exchange REST API
 """
 
+import math
+import os
 import time
 import threading
 from datetime import datetime
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Set
 from dataclasses import dataclass, field
+
 import pandas as pd
 
-from strategies.avellaneda_stoikov.model import AvellanedaStoikov
-from strategies.avellaneda_stoikov.order_manager import OrderManager, OrderSide
+from strategies.avellaneda_stoikov.base_model import MarketMakingModel
+from strategies.avellaneda_stoikov.glft_model import GLFTModel
+from strategies.avellaneda_stoikov.order_manager import OrderManager
 from strategies.avellaneda_stoikov.regime import RegimeDetector, MarketRegime
 from strategies.avellaneda_stoikov.risk_manager import RiskManager
-from strategies.avellaneda_stoikov.bybit_client import (
-    BybitClient,
-    BybitWebSocket,
-    BybitConfig,
+from strategies.avellaneda_stoikov.fee_model import FeeModel, FeeTier
+from strategies.avellaneda_stoikov.orderbook import OrderBookCollector
+from strategies.avellaneda_stoikov.kappa_provider import (
+    KappaProvider,
+    LiveKappaProvider,
+)
+from strategies.avellaneda_stoikov.mexc_client import (
+    MexcClient,
+    DryRunClient,
+    MexcConfig,
+    MexcMarketPoller,
+)
+from strategies.avellaneda_stoikov.bybit_futures_client import (
+    BybitFuturesClient,
+    DryRunFuturesClient,
+    BybitMarketPoller,
 )
 from strategies.avellaneda_stoikov.config_optimized import (
     INITIAL_CAPITAL,
-    RISK_AVERSION,
-    ORDER_BOOK_LIQUIDITY,
-    MIN_SPREAD,
-    MAX_SPREAD,
     ORDER_SIZE,
     USE_REGIME_FILTER,
     ADX_TREND_THRESHOLD,
-    MAKER_FEE,
 )
+from strategies.avellaneda_stoikov.db import TradingDB
+from strategies.avellaneda_stoikov.config import (
+    BAD_TICK_THRESHOLD,
+    DISPLACEMENT_THRESHOLD,
+    DISPLACEMENT_LOOKBACK,
+    DISPLACEMENT_AGGRESSION,
+    DISPLACEMENT_MAX_MULT,
+    DISPLACEMENT_MIN_MULT,
+    INVENTORY_SOFT_LIMIT,
+    INVENTORY_HARD_LIMIT,
+    FILL_COOLDOWN_SECONDS,
+    DYNAMIC_GAMMA_ENABLED,
+    VOLATILITY_LOOKBACK,
+    VOLATILITY_REFERENCE,
+    GAMMA_MIN_MULT,
+    GAMMA_MAX_MULT,
+    DUAL_TIMEFRAME_VOL_ENABLED,
+    VOL_FAST_WINDOW,
+    VOL_SLOW_WINDOW,
+    ASYMMETRIC_SPREADS_ENABLED,
+    MOMENTUM_LOOKBACK,
+    MOMENTUM_THRESHOLD,
+    ASYMMETRY_AGGRESSION,
+    FILL_IMBALANCE_ENABLED,
+    FILL_IMBALANCE_WINDOW,
+    FILL_IMBALANCE_THRESHOLD,
+    IMBALANCE_WIDENING,
+    USE_FUTURES,
+    LEVERAGE,
+    LIQUIDATION_THRESHOLD,
+    EMERGENCY_REDUCE_RATIO,
+    BYBIT_MIN_ORDER_SIZE,
+    BYBIT_LOT_SIZE,
+    INVENTORY_MAX_HOLD_SECONDS,
+    INVENTORY_MAX_UNREALIZED_LOSS,
+)
+
+
+# ANSI color codes for terminal output
+class Colors:
+    """Terminal color codes for better log visibility."""
+    GREEN = '\033[92m'      # Buys, positive events
+    RED = '\033[91m'        # Sells, errors
+    YELLOW = '\033[93m'     # Warnings
+    CYAN = '\033[96m'       # Info, quotes
+    MAGENTA = '\033[95m'    # System events
+    BOLD = '\033[1m'        # Bold text
+    RESET = '\033[0m'       # Reset to default
 
 
 @dataclass
@@ -45,76 +113,151 @@ class TraderState:
     ask_price: Optional[float] = None
     bid_order_id: Optional[str] = None
     ask_order_id: Optional[str] = None
+    market_bid: float = 0.0
+    market_ask: float = 0.0
     inventory: float = 0.0
     cash: float = 0.0
     total_pnl: float = 0.0
+    total_fees: float = 0.0
     trades_count: int = 0
     errors: List[str] = field(default_factory=list)
 
 
 class LiveTrader:
     """
-    Live trader using Avellaneda-Stoikov model.
+    Live trader using a MarketMakingModel (GLFT or A-S).
 
-    Connects to Bybit and:
-    - Receives real-time price data
-    - Calculates optimal quotes using A-S model
-    - Places/updates limit orders
-    - Manages inventory and risk
+    Supports both MEXC spot and Bybit futures:
+    - MEXC spot: 0% maker fees, good for low-frequency strategies
+    - Bybit futures: 50-100x leverage, 0.01% maker fees, HFT-optimized
+
+    Features:
+    - Polls real-time price + order book data via REST
+    - Calibrates kappa from live trade flow (spot only)
+    - Calculates optimal quotes using the model
+    - Places/updates LIMIT_MAKER orders
+    - Tracks fees and manages inventory/positions
+    - Liquidation protection for leveraged futures trading
     """
 
     def __init__(
         self,
         api_key: str,
         api_secret: str,
-        testnet: bool = True,
+        dry_run: bool = True,
         symbol: str = "BTCUSDT",
         initial_capital: float = INITIAL_CAPITAL,
-        order_size: float = ORDER_SIZE,
+        order_pct: float = 4.0,
         use_regime_filter: bool = USE_REGIME_FILTER,
-        quote_interval: float = 5.0,  # Seconds between quote updates
+        quote_interval: float = 5.0,
+        model: Optional[MarketMakingModel] = None,
+        fee_model: Optional[FeeModel] = None,
+        kappa_provider: Optional[KappaProvider] = None,
+        use_futures: bool = USE_FUTURES,
+        leverage: int = LEVERAGE,
+        order_value_usdt: Optional[float] = None,
     ):
-        """
-        Initialize live trader.
-
-        Args:
-            api_key: Bybit API key
-            api_secret: Bybit API secret
-            testnet: Use testnet (True) or mainnet (False)
-            symbol: Trading symbol
-            initial_capital: Starting capital for tracking
-            order_size: Order size in BTC
-            use_regime_filter: Enable regime detection
-            quote_interval: Seconds between quote updates
-        """
         self.symbol = symbol
         self.initial_capital = initial_capital
-        self.order_size = order_size
+        self.order_pct = order_pct
+
+        # Calculate order value from percentage if not explicitly provided
+        if order_value_usdt is None:
+            self.order_value_usdt = initial_capital * (order_pct / 100.0)
+        else:
+            self.order_value_usdt = order_value_usdt
         self.use_regime_filter = use_regime_filter
         self.quote_interval = quote_interval
+        self.dry_run = dry_run
+        self.use_futures = use_futures
+        self.leverage = leverage
 
-        # Bybit client
-        self.config = BybitConfig(
-            api_key=api_key,
-            api_secret=api_secret,
-            testnet=testnet,
-        )
-        self.client = BybitClient(self.config)
-        self.ws: Optional[BybitWebSocket] = None
+        # Warn if order value is too small for exchange minimum
+        if use_futures:
+            min_notional = BYBIT_MIN_ORDER_SIZE * 100000  # ~$97 at $97k BTC
+            if self.order_value_usdt < min_notional:
+                print(
+                    f"⚠️ WARNING: Order value ${self.order_value_usdt:.2f} < "
+                    f"minimum notional ~${min_notional:.0f} "
+                    f"(Bybit min {BYBIT_MIN_ORDER_SIZE} BTC). "
+                    f"All orders will be placed at minimum size."
+                )
 
-        # A-S Model
-        self.model = AvellanedaStoikov(
-            risk_aversion=RISK_AVERSION,
-            order_book_liquidity=ORDER_BOOK_LIQUIDITY,
-            min_spread=MIN_SPREAD,
-            max_spread=MAX_SPREAD,
-        )
+        # Create exchange client (MEXC spot or Bybit futures)
+        if use_futures:
+            # Bybit futures client
+            if dry_run:
+                self.client = DryRunFuturesClient(
+                    initial_balance=initial_capital,
+                    leverage=leverage,
+                    symbol=symbol,
+                    proxy=os.getenv('SOCKS5_PROXY'),  # Read proxy from environment
+                )
+            else:
+                self.client = BybitFuturesClient(
+                    api_key=api_key,
+                    api_secret=api_secret,
+                    testnet=False,
+                    proxy=os.getenv('SOCKS5_PROXY'),  # Read proxy from environment
+                )
+                # Set leverage and margin mode
+                try:
+                    self.client.set_leverage(symbol, leverage)
+                    self.client.set_margin_mode(symbol, 'isolated')
+                except Exception as e:
+                    print(f"Warning: Could not set leverage/margin: {e}")
+
+            self.poller = BybitMarketPoller(client=self.client, symbol=symbol)
+            self.collector = None  # No order book collector for futures yet
+        else:
+            # MEXC spot client
+            self.config = MexcConfig(
+                api_key=api_key,
+                api_secret=api_secret,
+            )
+            if dry_run:
+                self.client = DryRunClient(
+                    self.config,
+                    initial_usdt=initial_capital,
+                    initial_btc=0.0,
+                )
+            else:
+                self.client = MexcClient(self.config)
+
+            # Order book collector for kappa calibration
+            self.collector = OrderBookCollector()
+
+            # Market data poller
+            self.poller = MexcMarketPoller(
+                client=self.client,
+                collector=self.collector,
+                symbol=symbol,
+            )
+
+        # Model (default: GLFT infinite-horizon)
+        self.model: MarketMakingModel = model or GLFTModel()
+
+        # Fee model
+        self.fee_model = fee_model or FeeModel(FeeTier.REGULAR)
+
+        # Kappa provider (default: live calibration from collector if spot, constant if futures)
+        if use_futures:
+            # Futures mode: use constant kappa (no orderbook calibration yet)
+            from strategies.avellaneda_stoikov.kappa_provider import ConstantKappaProvider
+            self.kappa_provider: KappaProvider = kappa_provider or ConstantKappaProvider(
+                kappa=0.05, A=20.0
+            )
+        else:
+            self.kappa_provider: KappaProvider = kappa_provider or LiveKappaProvider(
+                collector=self.collector,
+            )
 
         # Order manager (for local tracking)
+        # Use USDT-based max inventory (10x order value)
         self.order_manager = OrderManager(
             initial_cash=initial_capital,
-            max_inventory=order_size * 10,
-            maker_fee=MAKER_FEE,
+            max_inventory=self.order_value_usdt * 10 / 100000.0,  # Estimate in BTC at ~$100k
+            maker_fee=self.fee_model.schedule.maker,
         )
 
         # Risk manager
@@ -136,54 +279,121 @@ class LiveTrader:
         self.state = TraderState()
         self.state.cash = initial_capital
 
+        # Track processed fills to avoid double-counting
+        self._processed_fills: Set[str] = set()
+
+        # Safety controls (Phase 1)
+        self._price_ema: float = 0.0
+        self._ema_alpha: float = 0.1
+        self._tick_rejection_count: int = 0
+        self._last_fill_time: float = 0.0
+        self._last_valid_tick_time: float = 0.0
+
+        # Phase 2: Advanced risk controls
+        self._recent_fills: List[str] = []  # Track 'buy' or 'sell'
+        self._vol_fast_ema: float = 0.0
+        self._vol_slow_ema: float = 0.0
+
+        # Futures-specific: Position tracking
+        self.position: Optional[Dict] = None  # {'size', 'side', 'entry_price', 'liq_price'}
+
+        # PnL tracking for round-trip trades
+        self._avg_entry_price: float = 0.0  # Weighted average entry price for current side
+        self._realized_pnl: float = 0.0     # Cumulative realized PnL from closed trades
+        self._closed_trades: int = 0         # Number of round-trip closes
+
+        # Inventory health tracking
+        self._inventory_start_time: float = 0.0  # When inventory became non-zero
+        self._last_inventory_reduce: float = 0.0  # Debounce for inventory reduction
+
+        # Log cooldown tracking (suppress spammy logs to once per 60s)
+        self._last_asymmetric_state: Optional[str] = None
+        self._last_asymmetric_log_time: float = 0.0
+        self._last_displacement_log_time: float = 0.0
+
+        # Database tracking (optional — no-ops if DATABASE_URL unset)
+        self._db = TradingDB()
+        self._start_time: Optional[datetime] = None
+        self._log_path: Optional[str] = None
+
         # Threading
         self._stop_event = threading.Event()
         self._quote_thread: Optional[threading.Thread] = None
 
-    def _on_ticker(self, ticker: Dict):
-        """Handle ticker update."""
+    @property
+    def order_size(self) -> float:
+        """Actual order size in BTC after exchange rounding.
+
+        Returns the quantity that will actually be placed, accounting for
+        exchange lot size and minimum order constraints. Used for inventory
+        limits and profitability checks — must reflect reality.
+        """
+        current_price = (
+            self.state.current_price
+            if hasattr(self, 'state') and self.state.current_price > 0
+            else 100000.0
+        )
+        raw_qty = self.order_value_usdt / current_price
+        if self.use_futures:
+            rounded = math.floor(raw_qty / BYBIT_LOT_SIZE) * BYBIT_LOT_SIZE
+            return max(rounded, BYBIT_MIN_ORDER_SIZE)
+        return raw_qty
+
+    def _validate_tick(self, price: float) -> bool:
+        """Reject ticks deviating > BAD_TICK_THRESHOLD from running EMA."""
+        if self._price_ema == 0.0:
+            self._price_ema = price
+            return True
+
+        deviation = abs(price - self._price_ema) / self._price_ema
+        if deviation > BAD_TICK_THRESHOLD:
+            self._tick_rejection_count += 1
+            print(
+                f"[{datetime.now()}] REJECTED TICK: ${price:.2f} "
+                f"(EMA: ${self._price_ema:.2f}, dev: {deviation:.2%})"
+            )
+            return False
+
+        self._price_ema = (
+            self._ema_alpha * price + (1 - self._ema_alpha) * self._price_ema
+        )
+        return True
+
+    def _poll_market_data(self):
+        """Poll market data and update state from ticker."""
+        ticker = self.poller.poll()
+        if ticker is None:
+            return
+
         try:
-            price = float(ticker.get("lastPrice", 0))
-            if price > 0:
+            # ccxt uses 'last' for Bybit, 'lastPrice' for some other exchanges
+            price = float(ticker.get("last") or ticker.get("lastPrice") or 0)
+            if price > 0 and self._validate_tick(price):
                 self.state.current_price = price
                 self.price_history.append(price)
-
-                # Keep last 100 prices for volatility
                 if len(self.price_history) > 100:
                     self.price_history = self.price_history[-100:]
+                self._last_valid_tick_time = time.time()
 
-            bid = float(ticker.get("bid1Price", 0))
-            ask = float(ticker.get("ask1Price", 0))
+                # Populate high/low from tick data for regime detection
+                self.high_history.append(price)
+                self.low_history.append(price)
+                if len(self.high_history) > 100:
+                    self.high_history = self.high_history[-100:]
+                    self.low_history = self.low_history[-100:]
+
+            # ccxt uses 'bid'/'ask' for Bybit, 'bid1Price'/'ask1Price' for some exchanges
+            bid = float(ticker.get("bid") or ticker.get("bid1Price") or 0)
+            ask = float(ticker.get("ask") or ticker.get("ask1Price") or 0)
             if bid > 0 and ask > 0:
                 self.state.current_spread = (ask - bid) / bid
+                self.state.market_bid = bid
+                self.state.market_ask = ask
 
             self.state.last_update = datetime.now()
 
         except Exception as e:
             self.state.errors.append(f"Ticker error: {e}")
-
-    def _on_kline(self, klines: List):
-        """Handle kline update for regime detection."""
-        try:
-            if not klines:
-                return
-
-            for kline in klines:
-                high = float(kline.get("high", 0))
-                low = float(kline.get("low", 0))
-                close = float(kline.get("close", 0))
-
-                if high > 0:
-                    self.high_history.append(high)
-                    self.low_history.append(low)
-
-                    # Keep last 50 for ADX
-                    if len(self.high_history) > 50:
-                        self.high_history = self.high_history[-50:]
-                        self.low_history = self.low_history[-50:]
-
-        except Exception as e:
-            self.state.errors.append(f"Kline error: {e}")
 
     def _detect_regime(self) -> Optional[MarketRegime]:
         """Detect current market regime."""
@@ -209,6 +419,14 @@ class LiveTrader:
         prices = pd.Series(self.price_history)
         return self.model.calculate_volatility(prices)
 
+    def _update_model_kappa(self):
+        """Update model's kappa and arrival rate from the kappa provider."""
+        kappa, A = self.kappa_provider.get_kappa()
+        if hasattr(self.model, "order_book_liquidity"):
+            self.model.order_book_liquidity = kappa
+        if hasattr(self.model, "arrival_rate"):
+            self.model.arrival_rate = A
+
     def _should_trade(self) -> bool:
         """Check if we should place quotes."""
         if not self.use_regime_filter:
@@ -223,15 +441,455 @@ class LiveTrader:
                     return False
         return True
 
+    def _is_spread_profitable(self, bid: float, ask: float) -> bool:
+        """Check if the spread is profitable after round-trip maker fees."""
+        notional = self.order_size * self.state.current_price
+        round_trip_fee = self.fee_model.round_trip_cost(notional, maker_both=True)
+        spread_profit = (ask - bid) * self.order_size
+        return spread_profit > round_trip_fee
+
+    def _calculate_displacement_multiplier(self) -> float:
+        """Calculate spread multiplier based on recent price displacement."""
+        if len(self.price_history) < DISPLACEMENT_LOOKBACK + 1:
+            return 1.0
+
+        price_now = self.price_history[-1]
+        price_ago = self.price_history[-DISPLACEMENT_LOOKBACK - 1]
+        displacement = abs(price_now - price_ago) / price_ago
+
+        if displacement > DISPLACEMENT_THRESHOLD:
+            mult = min(
+                DISPLACEMENT_MAX_MULT,
+                1.0 + DISPLACEMENT_AGGRESSION
+                * (displacement - DISPLACEMENT_THRESHOLD)
+                / DISPLACEMENT_THRESHOLD,
+            )
+            return mult
+
+        # Calm market: tighten proportionally (floor at DISPLACEMENT_MIN_MULT)
+        calm_ratio = displacement / DISPLACEMENT_THRESHOLD
+        return DISPLACEMENT_MIN_MULT + (1.0 - DISPLACEMENT_MIN_MULT) * calm_ratio
+
+    def _calculate_realized_volatility(self) -> float:
+        """Calculate realized volatility from recent price returns."""
+        if len(self.price_history) < VOLATILITY_LOOKBACK + 1:
+            return VOLATILITY_REFERENCE
+
+        returns = []
+        for i in range(-VOLATILITY_LOOKBACK, 0):
+            ret = (self.price_history[i] - self.price_history[i - 1]) / self.price_history[i - 1]
+            returns.append(ret)
+
+        # Standard deviation of returns
+        mean_ret = sum(returns) / len(returns)
+        variance = sum((r - mean_ret) ** 2 for r in returns) / len(returns)
+        return variance ** 0.5
+
+    def _calculate_dual_timeframe_volatility(self) -> float:
+        """Calculate max of fast/slow volatility for conservative sizing."""
+        if not DUAL_TIMEFRAME_VOL_ENABLED:
+            return self._calculate_volatility()
+
+        # Fast volatility
+        vol_fast = 0.0
+        if len(self.price_history) >= VOL_FAST_WINDOW + 1:
+            returns_fast = []
+            for i in range(-VOL_FAST_WINDOW, 0):
+                ret = (self.price_history[i] - self.price_history[i - 1]) / self.price_history[i - 1]
+                returns_fast.append(ret)
+            mean = sum(returns_fast) / len(returns_fast)
+            variance = sum((r - mean) ** 2 for r in returns_fast) / len(returns_fast)
+            vol_fast = variance ** 0.5
+
+        # Slow volatility
+        vol_slow = 0.0
+        if len(self.price_history) >= VOL_SLOW_WINDOW + 1:
+            returns_slow = []
+            for i in range(-VOL_SLOW_WINDOW, 0):
+                ret = (self.price_history[i] - self.price_history[i - 1]) / self.price_history[i - 1]
+                returns_slow.append(ret)
+            mean = sum(returns_slow) / len(returns_slow)
+            variance = sum((r - mean) ** 2 for r in returns_slow) / len(returns_slow)
+            vol_slow = variance ** 0.5
+
+        # Use max for conservative sizing (fallback to standard if neither ready)
+        if vol_fast == 0.0 and vol_slow == 0.0:
+            return self._calculate_volatility()
+        return max(vol_fast, vol_slow, self._calculate_volatility())
+
+    def _calculate_momentum(self) -> float:
+        """Calculate short-term price momentum for asymmetric spreads."""
+        if len(self.price_history) < MOMENTUM_LOOKBACK + 1:
+            return 0.0
+
+        price_now = self.price_history[-1]
+        price_ago = self.price_history[-MOMENTUM_LOOKBACK - 1]
+        return (price_now - price_ago) / price_ago
+
+    def _calculate_fill_imbalance(self) -> tuple:
+        """Calculate fill imbalance and return (imbalance_ratio, widening_side).
+
+        Returns:
+            (imbalance_ratio, widening_side):
+                - imbalance_ratio: 0.0-1.0, where 1.0 = all buys or all sells
+                - widening_side: 'buy' or 'sell' or None
+        """
+        if not FILL_IMBALANCE_ENABLED or len(self._recent_fills) < 5:
+            return 0.0, None
+
+        recent = self._recent_fills[-FILL_IMBALANCE_WINDOW:]
+        buy_count = sum(1 for side in recent if side == 'buy')
+        sell_count = sum(1 for side in recent if side == 'sell')
+        total = len(recent)
+
+        if total == 0:
+            return 0.0, None
+
+        buy_ratio = buy_count / total
+        sell_ratio = sell_count / total
+
+        if buy_ratio >= FILL_IMBALANCE_THRESHOLD:
+            return buy_ratio, 'buy'
+        elif sell_ratio >= FILL_IMBALANCE_THRESHOLD:
+            return sell_ratio, 'sell'
+        else:
+            return max(buy_ratio, sell_ratio), None
+
+    def _check_liquidation(self):
+        """Check if position is approaching liquidation and take action."""
+        if not self.use_futures:
+            return
+
+        # Check for liquidation in dry-run mode
+        if self.dry_run and hasattr(self.client, 'check_liquidation'):
+            current_price = self.state.current_price
+            if self.client.check_liquidation(current_price):
+                # Position was liquidated
+                self.position = None
+                self.state.inventory = 0.0
+                return
+
+        # Get current position
+        if self.dry_run:
+            pos_data = self.client.fetch_position(self.symbol)
+        else:
+            try:
+                pos_data = self.client.fetch_position(self.symbol)
+            except Exception as e:
+                print(f"Error fetching position: {e}")
+                return
+
+        if not pos_data:
+            self.position = None
+            return
+
+        # Update position tracking
+        current_price = self.state.current_price
+        size = float(pos_data.get('contracts', 0))
+        entry_price = float(pos_data.get('entryPrice', current_price))
+        liq_price = float(pos_data.get('liquidationPrice', 0))
+
+        if abs(size) < 1e-8:
+            self.position = None
+            self.state.inventory = 0.0
+            return
+
+        # Read actual position side from ccxt (contracts is always unsigned)
+        side = pos_data.get('side', 'long')
+
+        # Make size signed: negative for short positions
+        if side == 'short':
+            size = -size
+
+        self.position = {
+            'size': size,
+            'side': side,
+            'entry_price': entry_price,
+            'liq_price': liq_price,
+        }
+        self.state.inventory = size
+
+        # Calculate distance to liquidation (leverage-relative)
+        if liq_price > 0:
+            if self.position['side'] == 'long':
+                distance_pct = (current_price - liq_price) / current_price
+            else:  # short
+                distance_pct = (liq_price - current_price) / current_price
+
+            # Max possible distance to liquidation is ~1/leverage
+            max_liq_distance = 1.0 / self.leverage if self.leverage > 0 else 1.0
+            # How much of our safety margin have we consumed?
+            # fraction_used = 1.0 means at liq price, 0.0 means max distance
+            fraction_remaining = distance_pct / max_liq_distance if max_liq_distance > 0 else 1.0
+
+            # Emergency position reduction if remaining fraction is below threshold
+            if fraction_remaining < LIQUIDATION_THRESHOLD:
+                print(
+                    f"⚠️ APPROACHING LIQUIDATION: {distance_pct:.1%} from liq price "
+                    f"${liq_price:.2f} ({fraction_remaining:.0%} of safety margin). "
+                    f"Reducing position..."
+                )
+                self._emergency_reduce_position()
+
+    def _emergency_reduce_position(self):
+        """Reduce position size to avoid liquidation."""
+        if not self.position:
+            return
+
+        reduce_amount = abs(self.position['size']) * EMERGENCY_REDUCE_RATIO
+
+        # Round down to exchange lot size
+        reduce_amount = math.floor(reduce_amount / BYBIT_LOT_SIZE) * BYBIT_LOT_SIZE
+
+        # If reduce_amount is below minimum, try to close entire position
+        if reduce_amount < BYBIT_MIN_ORDER_SIZE:
+            reduce_amount = math.floor(abs(self.position['size']) / BYBIT_LOT_SIZE) * BYBIT_LOT_SIZE
+
+        # If position is still below minimum, skip
+        if reduce_amount < BYBIT_MIN_ORDER_SIZE:
+            print(
+                f"⚠️ Position too small to reduce ({reduce_amount:.6f} < {BYBIT_MIN_ORDER_SIZE} min). "
+                f"Manual intervention required."
+            )
+            return
+
+        # Place market order to reduce position
+        try:
+            side = 'sell' if self.position['side'] == 'long' else 'buy'
+            if side == 'buy':
+                print(
+                    f"{Colors.GREEN}{Colors.BOLD}🟢 [{datetime.now().strftime('%H:%M:%S')}] "
+                    f"MARKET BUY (emergency): {reduce_amount:.6f} BTC{Colors.RESET}"
+                )
+            else:
+                print(
+                    f"{Colors.RED}{Colors.BOLD}🔴 [{datetime.now().strftime('%H:%M:%S')}] "
+                    f"MARKET SELL (emergency): {reduce_amount:.6f} BTC{Colors.RESET}"
+                )
+
+            if not self.dry_run:
+                self.client.place_order(
+                    symbol=self.symbol,
+                    side=side,
+                    amount=reduce_amount,
+                    order_type='market',
+                )
+            else:
+                # In dry-run, simulate immediate fill at current price
+                current_price = self.state.current_price
+                if hasattr(self.client, '_execute_fill'):
+                    order = {
+                        'orderId': f'emergency-{int(time.time())}',
+                        'side': side,
+                        'amount': reduce_amount,
+                        'price': current_price,
+                    }
+                    self.client._execute_fill(order, current_price)
+
+                    # Sync LiveTrader state with the fill
+                    notional = reduce_amount * current_price
+                    fee = self.fee_model.maker_fee(notional)
+                    self.state.total_fees += fee
+
+                    if side == 'buy':
+                        self.state.inventory += reduce_amount
+                        self.state.cash -= notional + fee
+                    else:
+                        self.state.inventory -= reduce_amount
+                        self.state.cash += notional - fee
+
+                    self.state.trades_count += 1
+                    self._last_fill_time = time.time()
+
+                    if abs(self.state.inventory) < 1e-8:
+                        self._inventory_start_time = 0.0
+
+                    # Track fill side for imbalance detection
+                    self._recent_fills.append(side)
+                    if len(self._recent_fills) > FILL_IMBALANCE_WINDOW * 2:
+                        self._recent_fills = self._recent_fills[-FILL_IMBALANCE_WINDOW * 2:]
+
+                    # Color-coded fill logging
+                    ts = datetime.now().strftime('%H:%M:%S')
+                    fill_color = Colors.GREEN if side == 'buy' else Colors.RED
+                    fill_emoji = "🟢" if side == 'buy' else "🔴"
+                    print(
+                        f"{fill_color}{Colors.BOLD}{fill_emoji} [{ts}] FILL: {side.upper()} "
+                        f"{reduce_amount:.6f} BTC @ ${current_price:.2f} | Fee: ${fee:.4f} | "
+                        f"Inventory: {self.state.inventory:+.6f} BTC{Colors.RESET}"
+                    )
+
+                    # Per-trade PnL reporting
+                    self._process_trade_pnl(side, reduce_amount, current_price, fee)
+
+            # Cancel stale limit orders and force fresh re-quoting
+            self._cancel_all_orders()
+            self.state.bid_price = None
+            self.state.ask_price = None
+
+        except Exception as e:
+            print(f"Error reducing position: {e}")
+
+    def _check_inventory_health(self):
+        """Actively reduce inventory that is stale or losing money.
+
+        Two triggers:
+        1. Time-based: if holding inventory > INVENTORY_MAX_HOLD_SECONDS, reduce
+        2. Loss-based: if unrealized loss exceeds INVENTORY_MAX_UNREALIZED_LOSS × capital, flatten
+        """
+        inv = self.state.inventory
+        if abs(inv) < 1e-8:
+            # No inventory — reset timer
+            self._inventory_start_time = 0.0
+            return
+
+        now = time.time()
+
+        # Start the clock if not already ticking
+        if self._inventory_start_time == 0.0:
+            self._inventory_start_time = now
+
+        # Debounce: don't reduce more than once per 30 seconds
+        if self._last_inventory_reduce > 0 and (now - self._last_inventory_reduce) < 30.0:
+            return
+
+        # Calculate unrealized PnL on current inventory
+        if self._avg_entry_price > 0 and self.state.current_price > 0:
+            if inv > 0:
+                unrealized = (self.state.current_price - self._avg_entry_price) * inv
+            else:
+                unrealized = (self._avg_entry_price - self.state.current_price) * abs(inv)
+        else:
+            unrealized = 0.0
+
+        loss_threshold = self.initial_capital * INVENTORY_MAX_UNREALIZED_LOSS
+        hold_time = now - self._inventory_start_time if self._inventory_start_time > 0 else 0.0
+        should_reduce = False
+        reason = ""
+
+        # Trigger 1: Unrealized loss exceeds threshold
+        if unrealized < -loss_threshold:
+            should_reduce = True
+            reason = f"unrealized loss ${unrealized:,.2f} exceeds -${loss_threshold:,.2f} threshold"
+
+        # Trigger 2: Held too long
+        if hold_time > INVENTORY_MAX_HOLD_SECONDS:
+            should_reduce = True
+            reason = f"inventory held {hold_time:.0f}s (max {INVENTORY_MAX_HOLD_SECONDS}s)"
+
+        if not should_reduce:
+            return
+
+        # Reduce entire inventory via market order
+        reduce_qty = abs(inv)
+        if self.use_futures:
+            reduce_qty = math.floor(reduce_qty / BYBIT_LOT_SIZE) * BYBIT_LOT_SIZE
+            if reduce_qty < BYBIT_MIN_ORDER_SIZE:
+                return
+
+        side = 'sell' if inv > 0 else 'buy'
+        color = Colors.GREEN if side == 'buy' else Colors.RED
+        emoji = "🟢" if side == 'buy' else "🔴"
+        timestamp = datetime.now().strftime('%H:%M:%S')
+
+        print(
+            f"{Colors.YELLOW}{Colors.BOLD}⚠️ [{timestamp}] INVENTORY REDUCTION: "
+            f"{reason}{Colors.RESET}"
+        )
+        print(
+            f"{color}{Colors.BOLD}{emoji} [{timestamp}] MARKET {side.upper()} "
+            f"(inventory reduction): {reduce_qty:.6f} BTC{Colors.RESET}"
+        )
+
+        self._last_inventory_reduce = now
+
+        try:
+            if not self.dry_run:
+                self.client.place_order(
+                    symbol=self.symbol,
+                    side=side,
+                    amount=reduce_qty,
+                    order_type='market',
+                )
+            else:
+                # Simulate immediate fill at current price
+                current_price = self.state.current_price
+                if hasattr(self.client, '_execute_fill'):
+                    order = {
+                        'orderId': f'inv-reduce-{int(now)}',
+                        'side': side,
+                        'amount': reduce_qty,
+                        'price': current_price,
+                    }
+                    self.client._execute_fill(order, current_price)
+
+                    # Sync LiveTrader state with the fill
+                    notional = reduce_qty * current_price
+                    fee = self.fee_model.maker_fee(notional)
+                    self.state.total_fees += fee
+
+                    if side == 'buy':
+                        self.state.inventory += reduce_qty
+                        self.state.cash -= notional + fee
+                    else:
+                        self.state.inventory -= reduce_qty
+                        self.state.cash += notional - fee
+
+                    self.state.trades_count += 1
+                    self._last_fill_time = time.time()
+
+                    if abs(self.state.inventory) < 1e-8:
+                        self._inventory_start_time = 0.0
+
+                    # Track fill side for imbalance detection
+                    self._recent_fills.append(side)
+                    if len(self._recent_fills) > FILL_IMBALANCE_WINDOW * 2:
+                        self._recent_fills = self._recent_fills[-FILL_IMBALANCE_WINDOW * 2:]
+
+                    # Color-coded fill logging
+                    fill_color = Colors.GREEN if side == 'buy' else Colors.RED
+                    fill_emoji = "🟢" if side == 'buy' else "🔴"
+                    print(
+                        f"{fill_color}{Colors.BOLD}{fill_emoji} [{timestamp}] FILL: {side.upper()} "
+                        f"{reduce_qty:.6f} BTC @ ${current_price:.2f} | Fee: ${fee:.4f} | "
+                        f"Inventory: {self.state.inventory:+.6f} BTC{Colors.RESET}"
+                    )
+
+                    # Per-trade PnL reporting
+                    self._process_trade_pnl(side, reduce_qty, current_price, fee)
+
+            # Cancel stale limit orders and force fresh re-quoting.
+            # Without this, old order IDs remain in state, _update_quotes()
+            # sees no_orders=False and skips re-quoting — causing long fill
+            # gaps where only inventory reductions fire.
+            self._cancel_all_orders()
+            self.state.bid_price = None
+            self.state.ask_price = None
+
+            # Reset hold timer after reduction
+            self._inventory_start_time = time.time()
+
+        except Exception as e:
+            print(f"{Colors.RED}Error reducing inventory: {e}{Colors.RESET}")
+
     def _calculate_quotes(self) -> tuple:
-        """Calculate optimal bid/ask quotes."""
+        """Calculate optimal bid/ask quotes with Phase 2 enhancements."""
         if self.state.current_price <= 0:
             return None, None
 
-        volatility = self._calculate_volatility()
+        # Phase 2: Use dual-timeframe volatility for conservative sizing
+        volatility = self._calculate_dual_timeframe_volatility()
 
-        # Time remaining (assume 24h session)
-        time_remaining = 0.5  # Middle of session
+        # Phase 2: Dynamic gamma adjustment based on realized volatility
+        original_gamma = self.model.risk_aversion
+        if DYNAMIC_GAMMA_ENABLED:
+            realized_vol = self._calculate_realized_volatility()
+            gamma_mult = realized_vol / VOLATILITY_REFERENCE
+            gamma_mult = max(GAMMA_MIN_MULT, min(GAMMA_MAX_MULT, gamma_mult))
+            self.model.risk_aversion = original_gamma * gamma_mult
+
+        # Time remaining (GLFT ignores this; A-S uses 24h session midpoint)
+        time_remaining = 0.5
 
         bid, ask = self.model.calculate_quotes(
             mid_price=self.state.current_price,
@@ -240,18 +898,98 @@ class LiveTrader:
             time_remaining=time_remaining,
         )
 
+        # Restore original gamma for next iteration
+        self.model.risk_aversion = original_gamma
+
+        mid = (bid + ask) / 2
+        half_spread = (ask - bid) / 2
+
+        # Phase 1: Price displacement guard - widen spread during fast moves
+        disp_mult = self._calculate_displacement_multiplier()
+        if disp_mult != 1.0:
+            half_spread *= disp_mult
+            now = time.time()
+            if now - self._last_displacement_log_time > 60:
+                action = "widened" if disp_mult > 1.0 else "tightened"
+                print(
+                    f"[{datetime.now()}] DISPLACEMENT GUARD: "
+                    f"spread {action} {disp_mult:.2f}×"
+                )
+                self._last_displacement_log_time = now
+
+        # Phase 2: Asymmetric spreads - widen unfavorable side during trends
+        if ASYMMETRIC_SPREADS_ENABLED:
+            momentum = self._calculate_momentum()
+            if abs(momentum) > MOMENTUM_THRESHOLD:
+                if momentum > 0:  # Uptrend: widen ask
+                    ask_adjustment = ASYMMETRY_AGGRESSION
+                    bid_adjustment = 1.0
+                    new_asym = 'uptrend'
+                else:  # Downtrend: widen bid
+                    ask_adjustment = 1.0
+                    bid_adjustment = ASYMMETRY_AGGRESSION
+                    new_asym = 'downtrend'
+
+                # Only log on state change with 60s cooldown
+                if new_asym != self._last_asymmetric_state:
+                    now = time.time()
+                    if now - self._last_asymmetric_log_time > 60:
+                        side_str = 'ask' if new_asym == 'uptrend' else 'bid'
+                        print(f"[{datetime.now().strftime('%H:%M:%S')}] ASYMMETRIC: {new_asym} detected, widening {side_str}")
+                        self._last_asymmetric_log_time = now
+                    self._last_asymmetric_state = new_asym
+
+                bid = mid - half_spread * bid_adjustment
+                ask = mid + half_spread * ask_adjustment
+            else:
+                bid = mid - half_spread
+                ask = mid + half_spread
+                if self._last_asymmetric_state is not None:
+                    self._last_asymmetric_state = None
+        else:
+            bid = mid - half_spread
+            ask = mid + half_spread
+
+        # Phase 2: Fill imbalance - widen side getting filled too often
+        imbalance_ratio, imbalance_side = self._calculate_fill_imbalance()
+        if imbalance_side:
+            if imbalance_side == 'buy':  # Too many buys, widen bid
+                spread_width = ask - bid
+                bid = mid - (spread_width / 2) * IMBALANCE_WIDENING
+                ask = mid + (spread_width / 2)
+                print(
+                    f"[{datetime.now()}] FILL IMBALANCE: {imbalance_ratio:.0%} buys, "
+                    f"widening bid"
+                )
+            elif imbalance_side == 'sell':  # Too many sells, widen ask
+                spread_width = ask - bid
+                bid = mid - (spread_width / 2)
+                ask = mid + (spread_width / 2) * IMBALANCE_WIDENING
+                print(
+                    f"[{datetime.now()}] FILL IMBALANCE: {imbalance_ratio:.0%} sells, "
+                    f"widening ask"
+                )
+
         return bid, ask
 
     def _update_quotes(self):
         """Update quotes on exchange."""
         try:
+            # Post-fill cooldown: let market settle after a fill
+            if self._last_fill_time > 0:
+                elapsed = time.time() - self._last_fill_time
+                if elapsed < FILL_COOLDOWN_SECONDS:
+                    return
+
             # Check if we should trade
             if not self._should_trade():
-                # Cancel existing orders in trending market
                 if self.state.bid_order_id or self.state.ask_order_id:
                     self._cancel_all_orders()
                     print(f"[{datetime.now()}] Trending market - orders cancelled")
                 return
+
+            # Update kappa from live calibration before quoting
+            self._update_model_kappa()
 
             # Calculate new quotes
             bid, ask = self._calculate_quotes()
@@ -259,13 +997,38 @@ class LiveTrader:
             if bid is None or ask is None:
                 return
 
-            # Check if quotes changed significantly (> 0.1%)
+            # Check profitability after fees
+            if not self._is_spread_profitable(bid, ask):
+                return
+
+            # Inventory limits: reduce or skip orders on accumulating side
+            inv = self.state.inventory
+            q_soft = INVENTORY_SOFT_LIMIT * self.order_size
+            q_hard = INVENTORY_HARD_LIMIT * self.order_size
+            skip_buy = False
+            skip_sell = False
+
+            if abs(inv) > q_soft:
+                if inv > 0 and abs(inv) >= q_hard:
+                    skip_buy = True
+                elif inv < 0 and abs(inv) >= q_hard:
+                    skip_sell = True
+
+            # Smart cancel: only replace orders if the new quote moved enough.
+            # Threshold: 3 bps (0.03%) — keeps orders resting longer so the
+            # fill simulation has time to trigger. At typical 5-7 bps spreads,
+            # half-spread is ~2.5-3.5 bps, so orders stay within one spread-width
+            # of the model price.
+            REQUOTE_THRESHOLD = 0.0003  # 3 bps
             should_update = False
-            if self.state.bid_price is None or self.state.ask_price is None:
+            no_orders = (self.state.bid_order_id is None and self.state.ask_order_id is None)
+            if no_orders:
+                should_update = True  # Always re-quote when no orders are active
+            elif self.state.bid_price is None or self.state.ask_price is None:
                 should_update = True
-            elif abs(bid - self.state.bid_price) / self.state.bid_price > 0.001:
+            elif abs(bid - self.state.bid_price) / self.state.bid_price > REQUOTE_THRESHOLD:
                 should_update = True
-            elif abs(ask - self.state.ask_price) / self.state.ask_price > 0.001:
+            elif abs(ask - self.state.ask_price) / self.state.ask_price > REQUOTE_THRESHOLD:
                 should_update = True
 
             if not should_update:
@@ -274,33 +1037,59 @@ class LiveTrader:
             # Cancel existing orders
             self._cancel_all_orders()
 
-            # Place new orders
-            bid_result = self.client.place_order(
-                symbol=self.symbol,
-                side="Buy",
-                order_type="Limit",
-                qty=str(self.order_size),
-                price=str(round(bid, 2)),
-            )
-            self.state.bid_order_id = bid_result.get("orderId")
-            self.state.bid_price = bid
+            # Build order kwargs: always use value_usdt (calculated from order_pct)
+            order_kwargs = {'value_usdt': self.order_value_usdt}
 
-            ask_result = self.client.place_order(
-                symbol=self.symbol,
-                side="Sell",
-                order_type="Limit",
-                qty=str(self.order_size),
-                price=str(round(ask, 2)),
-            )
-            self.state.ask_order_id = ask_result.get("orderId")
-            self.state.ask_price = ask
+            # Place new LIMIT_MAKER orders (respect inventory limits)
+            if not skip_buy:
+                bid_result = self.client.place_maker_order(
+                    symbol=self.symbol,
+                    side="Buy",
+                    price=str(round(bid, 2)),
+                    **order_kwargs,
+                )
+                self.state.bid_order_id = bid_result.get("orderId")
+                self.state.bid_price = bid
+                print(
+                    f"{Colors.GREEN}🟢 [{datetime.now().strftime('%H:%M:%S')}] "
+                    f"LIMIT BUY placed: {self.order_size:.6f} BTC @ ${bid:,.2f}{Colors.RESET}"
+                )
+            else:
+                self.state.bid_price = bid
+                print(
+                    f"[{datetime.now()}] INV LIMIT: skipping buy "
+                    f"(inv={inv:.6f}, hard={q_hard:.6f})"
+                )
+
+            if not skip_sell:
+                ask_result = self.client.place_maker_order(
+                    symbol=self.symbol,
+                    side="Sell",
+                    price=str(round(ask, 2)),
+                    **order_kwargs,
+                )
+                self.state.ask_order_id = ask_result.get("orderId")
+                self.state.ask_price = ask
+                print(
+                    f"{Colors.RED}🔴 [{datetime.now().strftime('%H:%M:%S')}] "
+                    f"LIMIT SELL placed: {self.order_size:.6f} BTC @ ${ask:,.2f}{Colors.RESET}"
+                )
+            else:
+                self.state.ask_price = ask
+                print(
+                    f"[{datetime.now()}] INV LIMIT: skipping sell "
+                    f"(inv={inv:.6f}, hard={-q_hard:.6f})"
+                )
 
             spread_bps = (ask - bid) / self.state.current_price * 10000
-            print(f"[{datetime.now()}] Quotes updated: Bid ${bid:.2f} | Ask ${ask:.2f} | Spread {spread_bps:.1f}bps")
+            print(
+                f"{Colors.CYAN}📊 [{datetime.now().strftime('%H:%M:%S')}] Quotes updated: "
+                f"Bid ${bid:.2f} | Ask ${ask:.2f} | Spread {spread_bps:.1f}bps{Colors.RESET}"
+            )
 
         except Exception as e:
             self.state.errors.append(f"Quote update error: {e}")
-            print(f"Quote update error: {e}")
+            print(f"{Colors.RED}❌ Quote update error: {e}{Colors.RESET}")
 
     def _cancel_all_orders(self):
         """Cancel all open orders."""
@@ -311,39 +1100,250 @@ class LiveTrader:
         except Exception as e:
             self.state.errors.append(f"Cancel error: {e}")
 
+    def _process_trade_pnl(self, fill_side: str, qty: float, price: float, fee: float):
+        """Track entry prices and report PnL when round-trip trades close."""
+        timestamp = datetime.now().strftime('%H:%M:%S')
+
+        # Reconstruct inventory BEFORE this fill was applied
+        if fill_side == 'buy':
+            prev_inv = self.state.inventory - qty
+        else:
+            prev_inv = self.state.inventory + qty
+
+        # Determine if this fill increases or decreases position size
+        is_increasing = (
+            (fill_side == 'buy' and prev_inv >= 0) or
+            (fill_side == 'sell' and prev_inv <= 0)
+        )
+
+        if is_increasing:
+            # Entry fill: update weighted average entry price
+            old_qty = abs(prev_inv)
+            if old_qty + qty > 0:
+                self._avg_entry_price = (
+                    (self._avg_entry_price * old_qty + price * qty)
+                    / (old_qty + qty)
+                )
+            else:
+                self._avg_entry_price = price
+        else:
+            # Closing/reducing fill: calculate realized PnL
+            if self._avg_entry_price > 0:
+                close_qty = min(qty, abs(prev_inv))
+
+                if prev_inv > 0:  # Was long, selling to close
+                    pnl = (price - self._avg_entry_price) * close_qty - fee
+                    direction = (
+                        f"bought @ ${self._avg_entry_price:,.2f} → "
+                        f"sold @ ${price:,.2f}"
+                    )
+                else:  # Was short, buying to close
+                    pnl = (self._avg_entry_price - price) * close_qty - fee
+                    direction = (
+                        f"sold @ ${self._avg_entry_price:,.2f} → "
+                        f"bought @ ${price:,.2f}"
+                    )
+
+                self._realized_pnl += pnl
+                self._closed_trades += 1
+
+                # Buffer round-trip for DB
+                self._db.add_round_trip(
+                    entry_side="long" if prev_inv > 0 else "short",
+                    entry_price=self._avg_entry_price,
+                    exit_price=price,
+                    qty=close_qty,
+                    pnl=pnl,
+                    hold_time_seconds=0.0,  # TODO: track per-entry timestamps
+                )
+
+                if pnl >= 0:
+                    print(
+                        f"{Colors.GREEN}💰 [{timestamp}] TRADE CLOSED: "
+                        f"+${pnl:.2f} ({direction}){Colors.RESET}"
+                    )
+                else:
+                    print(
+                        f"{Colors.RED}💸 [{timestamp}] TRADE CLOSED: "
+                        f"-${abs(pnl):.2f} ({direction}){Colors.RESET}"
+                    )
+
+                # If fill flipped position to other side, record remainder as new entry
+                remainder = qty - close_qty
+                if remainder > 0:
+                    self._avg_entry_price = price
+
+        # Running PnL summary (compute inline since total_pnl updates after _check_fills)
+        running_pnl = (
+            self.state.cash
+            + self.state.inventory * self.state.current_price
+            - self.initial_capital
+        )
+        pnl_color = Colors.GREEN if running_pnl >= 0 else Colors.RED
+        print(
+            f"{pnl_color}📈 [{timestamp}] Running PnL: ${running_pnl:,.2f} | "
+            f"Trades: {self.state.trades_count} | "
+            f"Fees: ${self.state.total_fees:.2f}{Colors.RESET}"
+        )
+
     def _check_fills(self):
         """Check for order fills and update state."""
         try:
-            # Get recent order history
-            orders = self.client.get_order_history(self.symbol, limit=10)
+            if self.dry_run:
+                # In dry-run mode, use simulated fill checking with bid/ask
+                if self.state.market_bid == 0 or self.state.market_ask == 0:
+                    return  # Not yet populated
+                fills = self.client.check_fills(
+                    bid=self.state.market_bid, ask=self.state.market_ask
+                )
 
-            for order in orders:
-                if order.get("orderStatus") == "Filled":
+                # Verbose: log fill check attempts
+                if not fills and self.state.trades_count == 0:
+                    # Only log this occasionally to avoid spam
+                    if int(time.time()) % 30 == 0:  # Every 30 seconds
+                        print(f"{Colors.CYAN}[{datetime.now().strftime('%H:%M:%S')}] Checking fills... "
+                              f"(Bid: ${self.state.bid_price:.2f} | Market: ${self.state.current_price:.2f} | "
+                              f"Ask: ${self.state.ask_price:.2f}){Colors.RESET}")
+
+                for fill in fills:
+                    order_id = fill.get("orderId")
+                    if order_id and order_id not in self._processed_fills:
+                        self._processed_fills.add(order_id)
+                        side = fill.get("side")
+                        qty = float(fill.get("qty", 0))
+                        price = float(fill.get("avgPrice", 0))
+                        notional = qty * price
+
+                        fee = self.fee_model.maker_fee(notional)
+                        self.state.total_fees += fee
+
+                        if side in ("Buy", "buy"):
+                            self.state.inventory += qty
+                            self.state.cash -= notional + fee
+                        else:
+                            self.state.inventory -= qty
+                            self.state.cash += notional - fee
+
+                        self.state.trades_count += 1
+                        self._last_fill_time = time.time()
+
+                        # Reset inventory hold timer when inventory crosses zero
+                        if abs(self.state.inventory) < 1e-8:
+                            self._inventory_start_time = 0.0
+
+                        # Track fill side for imbalance detection
+                        fill_side = 'buy' if side.lower() in ('buy', 'b') else 'sell'
+                        self._recent_fills.append(fill_side)
+                        if len(self._recent_fills) > FILL_IMBALANCE_WINDOW * 2:
+                            self._recent_fills = self._recent_fills[-FILL_IMBALANCE_WINDOW * 2:]
+
+                        # Color-coded fill logging
+                        color = Colors.GREEN if fill_side == 'buy' else Colors.RED
+                        emoji = "🟢" if fill_side == 'buy' else "🔴"
+                        print(
+                            f"{color}{Colors.BOLD}{emoji} [{datetime.now().strftime('%H:%M:%S')}] FILL: {side.upper()} "
+                            f"{qty:.6f} BTC @ ${price:.2f} | Fee: ${fee:.4f} | "
+                            f"Inventory: {self.state.inventory:+.6f} BTC{Colors.RESET}"
+                        )
+
+                        # Buffer fill for DB
+                        self._db.add_fill(
+                            order_id=order_id, side=fill_side, qty=qty,
+                            price=price, fee=fee,
+                            inventory_after=self.state.inventory,
+                        )
+
+                        # Per-trade PnL reporting
+                        self._process_trade_pnl(fill_side, qty, price, fee)
+            else:
+                # In live mode, check order history
+                orders = self.client.get_order_history(self.symbol, limit=10)
+                for order in orders:
                     order_id = order.get("orderId")
-                    side = order.get("side")
-                    qty = float(order.get("qty", 0))
-                    price = float(order.get("avgPrice", 0))
+                    if (
+                        order.get("orderStatus") == "Filled"
+                        and order_id
+                        and order_id not in self._processed_fills
+                    ):
+                        self._processed_fills.add(order_id)
+                        side = order.get("side")
+                        qty = float(order.get("qty", 0))
+                        price = float(order.get("avgPrice", 0))
+                        notional = qty * price
 
-                    # Update local tracking
-                    if side == "Buy":
-                        self.state.inventory += qty
-                        self.state.cash -= qty * price
-                    else:
-                        self.state.inventory -= qty
-                        self.state.cash += qty * price
+                        fee = self.fee_model.maker_fee(notional)
+                        self.state.total_fees += fee
 
-                    self.state.trades_count += 1
-                    print(f"[{datetime.now()}] FILL: {side} {qty} @ ${price:.2f}")
+                        if side in ("Buy", "buy"):
+                            self.state.inventory += qty
+                            self.state.cash -= notional + fee
+                        else:
+                            self.state.inventory -= qty
+                            self.state.cash += notional - fee
+
+                        self.state.trades_count += 1
+                        self._last_fill_time = time.time()
+
+                        # Reset inventory hold timer when inventory crosses zero
+                        if abs(self.state.inventory) < 1e-8:
+                            self._inventory_start_time = 0.0
+
+                        # Track fill side for imbalance detection
+                        fill_side = 'buy' if side.lower() in ('buy', 'b') else 'sell'
+                        self._recent_fills.append(fill_side)
+                        if len(self._recent_fills) > FILL_IMBALANCE_WINDOW * 2:
+                            self._recent_fills = self._recent_fills[-FILL_IMBALANCE_WINDOW * 2:]
+
+                        # Color-coded fill logging
+                        color = Colors.GREEN if fill_side == 'buy' else Colors.RED
+                        emoji = "🟢" if fill_side == 'buy' else "🔴"
+                        print(
+                            f"{color}{Colors.BOLD}{emoji} [{datetime.now().strftime('%H:%M:%S')}] FILL: {side.upper()} "
+                            f"{qty:.6f} BTC @ ${price:.2f} | Fee: ${fee:.4f} | "
+                            f"Inventory: {self.state.inventory:+.6f} BTC{Colors.RESET}"
+                        )
+
+                        # Buffer fill for DB
+                        self._db.add_fill(
+                            order_id=order_id, side=fill_side, qty=qty,
+                            price=price, fee=fee,
+                            inventory_after=self.state.inventory,
+                        )
+
+                        # Per-trade PnL reporting
+                        self._process_trade_pnl(fill_side, qty, price, fee)
 
         except Exception as e:
             self.state.errors.append(f"Fill check error: {e}")
 
     def _quote_loop(self):
         """Main loop for updating quotes."""
+        print(f"{Colors.MAGENTA}▶ Quote loop started{Colors.RESET}")
         while not self._stop_event.is_set():
             try:
-                self._update_quotes()
+                self._poll_market_data()
+
+                # Stale data protection: pull quotes if no valid tick
+                if (
+                    self._last_valid_tick_time > 0
+                    and time.time() - self._last_valid_tick_time > 15.0
+                ):
+                    if self.state.bid_order_id or self.state.ask_order_id:
+                        self._cancel_all_orders()
+                        print(
+                            f"{Colors.YELLOW}⚠️ [{datetime.now().strftime('%H:%M:%S')}] STALE DATA — "
+                            f"orders pulled (no valid tick for 15s){Colors.RESET}"
+                        )
+                    self._stop_event.wait(self.quote_interval)
+                    continue
+
                 self._check_fills()
+                self._check_inventory_health()
+                self._update_quotes()
+
+                # Futures: Check liquidation
+                if self.use_futures:
+                    self._check_liquidation()
 
                 # Update P&L
                 if self.state.current_price > 0:
@@ -353,9 +1353,14 @@ class LiveTrader:
                     )
 
             except Exception as e:
+                print(f"{Colors.RED}❌ [{datetime.now().strftime('%H:%M:%S')}] Loop error: {e}{Colors.RESET}")
+                import traceback
+                traceback.print_exc()
                 self.state.errors.append(f"Loop error: {e}")
 
             self._stop_event.wait(self.quote_interval)
+
+        print(f"{Colors.MAGENTA}⏹ Quote loop stopped{Colors.RESET}")
 
     def start(self):
         """Start the trader."""
@@ -363,30 +1368,72 @@ class LiveTrader:
             print("Trader already running")
             return
 
+        model_name = type(self.model).__name__
+        fee_tier = self.fee_model.tier.value
+        kappa_mode = type(self.kappa_provider).__name__
+        mode = "DRY-RUN" if self.dry_run else "LIVE"
+
+        exchange_name = "Bybit Futures" if self.use_futures else "MEXC Spot"
+
         print("=" * 60)
-        print("AVELLANEDA-STOIKOV PAPER TRADER")
+        print("MARKET MAKING PAPER TRADER")
         print("=" * 60)
-        print(f"Mode:           {'TESTNET' if self.config.testnet else 'MAINNET'}")
+        print(f"Model:          {model_name}")
+        print(f"Exchange:       {exchange_name} ({mode})")
         print(f"Symbol:         {self.symbol}")
         print(f"Initial Capital: ${self.initial_capital:,.2f}")
-        print(f"Order Size:     {self.order_size} BTC")
+        print(f"Order Pct:      {self.order_pct}% of capital")
+        print(f"Order Value:    ${self.order_value_usdt:,.2f} USDT per order")
+        if self.use_futures:
+            print(f"Leverage:       {self.leverage}x")
+        print(f"Fee Tier:       {fee_tier} (maker: {self.fee_model.schedule.maker:.4%})")
+        print(f"Kappa Mode:     {kappa_mode}")
         print(f"Regime Filter:  {'ON' if self.use_regime_filter else 'OFF'}")
         print(f"Quote Interval: {self.quote_interval}s")
+
+        # GLFT parameter summary
+        if hasattr(self.model, 'risk_aversion'):
+            gamma = self.model.risk_aversion
+            kappa, A = self.kappa_provider.get_kappa()
+            min_s = self.model.min_spread_dollar
+            max_s = self.model.max_spread_dollar
+            # Estimate spread at σ=0.5%, mid=$100k
+            sigma_est = 500.0  # 0.5% × $100k
+            import numpy as np
+            adverse = (1 / kappa) * np.log(1 + kappa / gamma) if kappa > 0 and gamma > 0 else 0
+            vol_term = np.sqrt(np.e * sigma_est**2 * gamma / (2 * A * kappa)) if A > 0 and kappa > 0 else 0
+            est_spread = 2 * (adverse + vol_term)
+            est_bps = est_spread / 100000 * 10000
+            print(f"Model Params:   γ={gamma}  κ={kappa}  A={A}")
+            print(f"Spread Bounds:  ${min_s:.2f} - ${max_s:.2f}")
+            print(f"Est. Spread:    ~${est_spread:.0f} ({est_bps:.1f} bps) at σ=0.5%, mid=$100k")
+
+        print(f"Safety:         tick_filter={BAD_TICK_THRESHOLD:.0%} | "
+              f"inv_limit={INVENTORY_SOFT_LIMIT}/{INVENTORY_HARD_LIMIT}× | "
+              f"cooldown={FILL_COOLDOWN_SECONDS}s | "
+              f"disp_guard={DISPLACEMENT_THRESHOLD:.1%}")
+        print(f"Inv Health:     max_hold={INVENTORY_MAX_HOLD_SECONDS}s | "
+              f"max_loss={INVENTORY_MAX_UNREALIZED_LOSS:.1%} of capital")
+
+        # Phase 2 features summary
+        phase2_features = []
+        if DYNAMIC_GAMMA_ENABLED:
+            phase2_features.append("dynamic_γ")
+        if DUAL_TIMEFRAME_VOL_ENABLED:
+            phase2_features.append("dual_vol")
+        if ASYMMETRIC_SPREADS_ENABLED:
+            phase2_features.append("asym_spreads")
+        if FILL_IMBALANCE_ENABLED:
+            phase2_features.append("fill_imbal")
+        if phase2_features:
+            print(f"Phase 2:        {' | '.join(phase2_features)}")
+
         print("=" * 60)
 
-        # Start WebSocket
-        self.ws = BybitWebSocket(
-            self.config,
-            on_ticker=self._on_ticker,
-            on_kline=self._on_kline,
-        )
-        self.ws.start()
+        # Record session start time for DB tracking
+        self._start_time = datetime.now()
 
-        # Wait for initial data
-        print("Waiting for market data...")
-        time.sleep(3)
-
-        # Start quote loop
+        # Start quote loop (polls market data inline)
         self._stop_event.clear()
         self._quote_thread = threading.Thread(target=self._quote_loop)
         self._quote_thread.daemon = True
@@ -404,11 +1451,48 @@ class LiveTrader:
         # Cancel all orders
         self._cancel_all_orders()
 
-        # Stop WebSocket
-        if self.ws:
-            self.ws.stop()
-
         self.state.is_running = False
+
+        # Finalize DB instance (writes all buffered data in one transaction)
+        end_time = datetime.now()
+        duration = (
+            (end_time - self._start_time).total_seconds()
+            if self._start_time
+            else 0.0
+        )
+        kappa, arrival_rate = self.kappa_provider.get_kappa()
+        self._db.finalize_instance(
+            {
+                "gamma": getattr(self.model, "risk_aversion", None),
+                "kappa": kappa,
+                "arrival_rate": arrival_rate,
+                "min_spread": getattr(self.model, "min_spread_dollar", None),
+                "max_spread": getattr(self.model, "max_spread_dollar", None),
+                "quote_interval": self.quote_interval,
+                "fee_tier": self.fee_model.tier.value,
+                "leverage": self.leverage,
+                "use_regime_filter": self.use_regime_filter,
+                "capital": self.initial_capital,
+                "order_pct": self.order_pct,
+                "symbol": self.symbol,
+                "exchange": "bybit" if self.use_futures else "mexc",
+                "is_dry_run": self.dry_run,
+                "start_time": self._start_time,
+                "end_time": end_time,
+                "duration_seconds": duration,
+                "final_price": self.state.current_price,
+                "final_inventory": self.state.inventory,
+                "final_cash": self.state.cash,
+                "total_pnl": self.state.total_pnl,
+                "realized_pnl": self._realized_pnl,
+                "total_fees": self.state.total_fees,
+                "trades_count": self.state.trades_count,
+                "closed_trades": self._closed_trades,
+                "tick_rejections": self._tick_rejection_count,
+                "error_count": len(self.state.errors),
+                "log_file": self._log_path,
+            }
+        )
 
         # Print summary
         self._print_summary()
@@ -419,11 +1503,16 @@ class LiveTrader:
         print("=" * 60)
         print("SESSION SUMMARY")
         print("=" * 60)
+        print(f"Model:           {type(self.model).__name__}")
+        print(f"Mode:            {'DRY-RUN' if self.dry_run else 'LIVE'}")
         print(f"Final Price:     ${self.state.current_price:,.2f}")
         print(f"Final Inventory: {self.state.inventory:.6f} BTC")
         print(f"Final Cash:      ${self.state.cash:,.2f}")
         print(f"Total P&L:       ${self.state.total_pnl:,.2f}")
+        print(f"Realized P&L:    ${self._realized_pnl:,.2f} ({self._closed_trades} round-trips)")
+        print(f"Total Fees:      ${self.state.total_fees:,.4f}")
         print(f"Total Trades:    {self.state.trades_count}")
+        print(f"Ticks Rejected:  {self._tick_rejection_count}")
         print(f"Errors:          {len(self.state.errors)}")
         print("=" * 60)
 
@@ -431,12 +1520,15 @@ class LiveTrader:
         """Get current trader status."""
         return {
             "is_running": self.state.is_running,
+            "model": type(self.model).__name__,
+            "mode": "dry-run" if self.dry_run else "live",
             "current_price": self.state.current_price,
             "current_spread": self.state.current_spread,
             "current_regime": self.state.current_regime,
             "inventory": self.state.inventory,
             "cash": self.state.cash,
             "total_pnl": self.state.total_pnl,
+            "total_fees": self.state.total_fees,
             "trades_count": self.state.trades_count,
             "bid_price": self.state.bid_price,
             "ask_price": self.state.ask_price,

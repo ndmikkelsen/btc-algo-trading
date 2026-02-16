@@ -18,7 +18,9 @@ from strategies.avellaneda_stoikov import (
 )
 from strategies.avellaneda_stoikov.metrics import calculate_all_metrics
 from strategies.avellaneda_stoikov.regime import RegimeDetector
-from strategies.avellaneda_stoikov.config import MAKER_FEE
+from strategies.avellaneda_stoikov.config import (
+    MAKER_FEE, FILL_AGGRESSIVENESS, MAX_SLIPPAGE_PCT, STOP_LOSS_PCT,
+)
 
 
 def load_data(timeframe: str = "1h", data_dir: str = "data") -> pd.DataFrame:
@@ -44,6 +46,10 @@ def run_backtest(
     order_size: float = 0.001,
     maker_fee: float = MAKER_FEE,
     use_regime_filter: bool = False,
+    fill_aggressiveness: float = FILL_AGGRESSIVENESS,
+    max_slippage_pct: float = MAX_SLIPPAGE_PCT,
+    stop_loss_pct: float = STOP_LOSS_PCT,
+    random_seed: int = None,
     verbose: bool = True,
 ) -> dict:
     """
@@ -93,6 +99,10 @@ def run_backtest(
         order_manager=manager,
         order_size=order_size,
         use_regime_filter=use_regime_filter,
+        fill_aggressiveness=fill_aggressiveness,
+        max_slippage_pct=max_slippage_pct,
+        stop_loss_pct=stop_loss_pct,
+        random_seed=random_seed,
     )
 
     # Run backtest

@@ -29,6 +29,185 @@ second-brain/
 | Issue tracking | `.rules/patterns/beads-integration.md` | Beads workflow |
 | Session completion | `.claude/commands/land.md` | /land protocol |
 | Search knowledge | `.claude/commands/query.md` | /query command |
+| Paper trading | `.claude/commands/run-test.md` | /run-test skill |
+| Live trading | `.claude/commands/run-live.md` | /run-live skill |
+| Stop trading | `.claude/commands/stop.md` | /stop skill |
+
+## Development Workflow
+
+### BDD/TDD Pipeline (MANDATORY for features)
+
+All new features follow this pipeline:
+
+```
+beads epic/task
+    ↓  /creating-features-from-tasks
+.feature file (Gherkin scenarios)
+    ↓  /planning-features
+.plan.md (implementation plan)
+    ↓  /creating-tasks-from-plans
+beads tasks (with dependencies)
+    ↓  /implementing-with-tdd
+test_*.py + production code (red-green-refactor)
+```
+
+### Red-Green-Refactor Protocol
+
+| Phase | Action | Verification |
+|-------|--------|-------------|
+| RED | Write failing test | `pytest` fails for the right reason |
+| GREEN | Write minimal code to pass | `pytest` passes |
+| REFACTOR | Improve code quality | `pytest` still passes |
+
+### AI Skills for BDD
+
+| Skill | Purpose | Trigger |
+|-------|---------|---------|
+| `/creating-features-from-tasks` | Create `.feature` from beads task | "create feature file", "write scenarios" |
+| `/planning-features` | Create `.plan.md` from `.feature` | "plan this feature" |
+| `/planning-from-tasks` | Create `.plan.md` from beads epic (no BDD) | "plan this epic" |
+| `/creating-tasks-from-plans` | Create beads tasks from `.plan.md` | "create tasks from plan" |
+| `/implementing-with-tdd` | TDD implementation of beads tasks | "implement this task", "TDD this" |
+
+### Trading Skills
+
+| Skill | Purpose | Trigger |
+|-------|---------|---------|
+| `/run-test` | Paper trade with real market data (simulated fills) | "paper trade", "test trader", "dry run" |
+| `/run-live` | Live trading with real orders on MEXC | "go live", "start live trading" |
+| `/stop` | Gracefully stop any running trading process | "stop trading", "kill trader" |
+
+#### Expected Workflow: Test Then Go Live
+
+```
+/run-test                    # 1. Paper trade — validate strategy with real market data
+  (analyze results)          # 2. Review PnL, fill rates, spread capture
+/run-test --gamma 0.001      # 3. Tune parameters, repeat
+  (satisfied with results?)  # 4. Confirm strategy is profitable
+/run-live                    # 5. Go live (requires explicit confirmation)
+/stop                        # 6. Stop when done or if issues arise
+```
+
+#### `/run-test` — Paper Trading
+
+Launches the GLFT market maker in dry-run mode. Uses real MEXC market data with simulated order fills locally. No real money at risk.
+
+```bash
+/run-test                                    # Default: BTCUSDT, GLFT model
+/run-test --gamma 0.001 --order-size 0.005   # Custom risk aversion + size
+/run-test --kappa constant --kappa-value 0.05 # Fixed kappa (skip live calibration)
+/run-test --interval 3 --capital 5000         # Faster updates, more capital
+/run-test --no-regime-filter                  # Disable ADX regime detection
+```
+
+Key parameters:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--gamma` | `0.005` | Risk aversion (1/$² units). Higher = tighter spreads with inventory |
+| `--kappa` | `live` | Kappa mode: `live` (order book) or `constant` |
+| `--order-size` | `0.003` | Order size in BTC |
+| `--interval` | `5.0` | Quote update interval in seconds |
+| `--min-spread` | `5.0` | Minimum spread in dollars |
+| `--max-spread` | `100.0` | Maximum spread in dollars |
+| `--capital` | `1000.0` | Initial capital in USDT |
+
+#### `/run-live` — Live Trading
+
+Launches the GLFT market maker with real orders on MEXC. **Requires explicit user confirmation** before placing any orders.
+
+```bash
+/run-live                       # Default settings (prompts for confirmation)
+/run-live --gamma 0.01          # Conservative risk aversion
+/run-live --dry-run             # Override: paper trade instead (no confirmation needed)
+```
+
+Requires `MEXC_API_KEY` and `MEXC_API_SECRET` in `.env`. Safety checks:
+- Confirmation prompt before any live trading
+- Warns if order size > 0.1 BTC or capital > $50,000
+- All sessions logged to `logs/live-BTCUSDT-YYYYMMDD-HHMMSS.log`
+
+#### `/stop` — Graceful Shutdown
+
+Stops running trading processes by sending SIGINT, which triggers `trader.stop()` to cancel all open exchange orders and print a session summary.
+
+```bash
+/stop    # Finds and gracefully stops all running traders
+```
+
+Uses SIGINT (not SIGKILL) to ensure open orders are cancelled on the exchange. Never force-kills unless explicitly requested.
+
+### Agent Conventions
+
+Claude agent teams MUST follow these conventions:
+
+1. **Use beads for ALL task tracking** - `bd create`, `bd update`, `bd close`
+2. **Use cognee for knowledge queries** - `/query` before planning, after discovering patterns
+3. **BDD for features** - All features start with `.feature` files
+4. **TDD for implementation** - Red-green-refactor, no exceptions
+5. **Complete sessions with /land** - Never skip the landing protocol
+
+### Test File Locations
+
+| Type | Location | Framework |
+|------|----------|-----------|
+| BDD feature tests | `features/<domain>/test_*.py` | pytest-bdd |
+| Unit tests | `tests/unit/<module>/test_*.py` | pytest |
+| Integration tests | `tests/integration/test_*.py` | pytest |
+
+## Development Workflow
+
+### BDD/TDD Pipeline (MANDATORY for features)
+
+All new features follow this pipeline:
+
+```
+beads epic/task
+    ↓  /creating-features-from-tasks
+.feature file (Gherkin scenarios)
+    ↓  /planning-features
+.plan.md (implementation plan)
+    ↓  /creating-tasks-from-plans
+beads tasks (with dependencies)
+    ↓  /implementing-with-tdd
+test_*.py + production code (red-green-refactor)
+```
+
+### Red-Green-Refactor Protocol
+
+| Phase | Action | Verification |
+|-------|--------|-------------|
+| RED | Write failing test | `pytest` fails for the right reason |
+| GREEN | Write minimal code to pass | `pytest` passes |
+| REFACTOR | Improve code quality | `pytest` still passes |
+
+### AI Skills for BDD
+
+| Skill | Purpose | Trigger |
+|-------|---------|---------|
+| `/creating-features-from-tasks` | Create `.feature` from beads task | "create feature file", "write scenarios" |
+| `/planning-features` | Create `.plan.md` from `.feature` | "plan this feature" |
+| `/planning-from-tasks` | Create `.plan.md` from beads epic (no BDD) | "plan this epic" |
+| `/creating-tasks-from-plans` | Create beads tasks from `.plan.md` | "create tasks from plan" |
+| `/implementing-with-tdd` | TDD implementation of beads tasks | "implement this task", "TDD this" |
+
+### Agent Conventions
+
+Claude agent teams MUST follow these conventions:
+
+1. **Use beads for ALL task tracking** - `bd create`, `bd update`, `bd close`
+2. **Use cognee for knowledge queries** - `/query` before planning, after discovering patterns
+3. **BDD for features** - All features start with `.feature` files
+4. **TDD for implementation** - Red-green-refactor, no exceptions
+5. **Complete sessions with /land** - Never skip the landing protocol
+
+### Test File Locations
+
+| Type | Location | Framework |
+|------|----------|-----------|
+| BDD feature tests | `features/<domain>/test_*.py` | pytest-bdd |
+| Unit tests | `tests/unit/<module>/test_*.py` | pytest |
+| Integration tests | `tests/integration/test_*.py` | pytest |
 
 ## Quick Commands
 
@@ -282,6 +461,16 @@ Work is **NOT complete** until `git push` succeeds:
 
 See [.claude/commands/land.md](.claude/commands/land.md) for complete protocol.
 
+## Testing (Non-Negotiables)
+
+- **BDD for features** - All features start with `.feature` files
+- **TDD for implementation** - Red-green-refactor, no exceptions
+- **.plan.md for complex features** - Design before code
+- **Test files colocated** - BDD tests in `features/`, unit tests in `tests/`
+- **Mock external services** - No real API calls in unit tests
+- **Use pytest** for all testing
+- **Test edge cases** - Errors, boundary conditions, empty states
+
 ## Anti-Patterns (NEVER)
 
 | Rule | Why |
@@ -290,6 +479,9 @@ See [.claude/commands/land.md](.claude/commands/land.md) for complete protocol.
 | Skip /land protocol | Work not complete |
 | Unpushed commits | Session incomplete |
 | Direct main/dev commits | Use topic branches + PR |
+| Write code before tests | Use TDD red-green-refactor |
+| Skip .feature files for features | Use BDD pipeline |
+| Ad-hoc task tracking | Use Beads exclusively |
 
 ## Constitution + Cognee Integration
 

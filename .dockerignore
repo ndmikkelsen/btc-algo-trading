@@ -1,0 +1,39 @@
+# Version control
+.git
+.gitattributes
+
+# Python caches
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+# Virtual environments
+.venv
+venv
+
+# Data and results (large, not needed at runtime)
+data/
+backtests/
+notebooks/
+
+# Environment and secrets
+.env*
+!.env.example
+
+# AI / project management tooling
+.claude/
+.beads/
+.rules/
+
+# Documentation (not needed at runtime)
+*.md
+docs/
+features/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store

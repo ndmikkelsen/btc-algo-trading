@@ -41,6 +41,35 @@
 - Prune what's no longer useful
 - Knowledge unused is knowledge lost
 
+### 6. BDD-First Feature Development
+
+All new features MUST follow the BDD workflow:
+
+1. **Start with .feature** - Write Gherkin scenarios BEFORE any code
+2. **Create .plan.md** - Document design decisions, implementation plan, and done criteria
+3. **Generate tasks** - Create beads issues from the plan with dependencies
+4. **Red-Green-Refactor** - Follow strict TDD for each scenario
+
+### 7. TDD Red-Green-Refactor Protocol
+
+| Phase | Action | Verification |
+|-------|--------|-------------|
+| RED | Write a failing test | `pytest` fails for the right reason |
+| GREEN | Write minimal code to pass | `pytest` passes |
+| REFACTOR | Improve code quality | `pytest` still passes |
+
+**CRITICAL**:
+- NEVER skip RED phase
+- NEVER write production code without a failing test first
+- NEVER refactor while tests are failing
+
+### 8. Tool Discipline
+
+- **Beads** for ALL task tracking - No markdown TODOs, no ad-hoc tracking
+- **Cognee** for knowledge queries - Query before planning, capture learnings after
+- **pytest-bdd** for feature tests - Gherkin scenarios drive acceptance criteria
+- **pytest** for unit tests - Red-green-refactor, no exceptions
+
 ## Structure Principles
 
 ### Organization

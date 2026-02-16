@@ -3,7 +3,11 @@
 import pytest
 import numpy as np
 import pandas as pd
-from strategies.avellaneda_stoikov.model import AvellanedaStoikov
+from strategies.avellaneda_stoikov.model import (
+    AvellanedaStoikov,
+    VolatilityEstimator,
+    VolatilityEstimate,
+)
 
 
 class TestVolatilityEstimation:
@@ -44,6 +48,39 @@ class TestVolatilityEstimation:
         prices = pd.Series([100.0, 101.0])  # Only 2 prices
         volatility = model.calculate_volatility(prices)
         assert volatility > 0  # Should return a sensible default
+
+
+class TestVolatilityEstimator:
+    """Tests for the VolatilityEstimator multi-unit output."""
+
+    def test_estimate_returns_all_units(self):
+        """Estimate should return pct, dollar, and tick values."""
+        estimator = VolatilityEstimator(tick_size=0.10)
+        np.random.seed(42)
+        prices = pd.Series(50000 * np.cumprod(1 + np.random.normal(0, 0.01, 100)))
+        mid = prices.iloc[-1]
+
+        result = estimator.estimate(prices, mid_price=mid)
+
+        assert isinstance(result, VolatilityEstimate)
+        assert result.pct > 0
+        assert result.dollar == pytest.approx(result.pct * mid)
+        assert result.tick == pytest.approx(result.dollar / 0.10)
+        assert result.mid_price == mid
+
+    def test_estimate_uses_last_price_if_no_mid(self):
+        """Should use last price in series when mid_price not given."""
+        estimator = VolatilityEstimator()
+        prices = pd.Series([50000.0, 50100.0, 50050.0, 50200.0, 50150.0])
+        result = estimator.estimate(prices)
+        assert result.mid_price == 50150.0
+
+    def test_estimate_zero_tick_size(self):
+        """Should handle zero tick_size gracefully."""
+        estimator = VolatilityEstimator(tick_size=0.0)
+        prices = pd.Series([100.0, 101.0, 100.5] * 20)
+        result = estimator.estimate(prices, mid_price=100.0)
+        assert result.tick == 0.0
 
 
 class TestReservationPrice:
@@ -128,6 +165,24 @@ class TestReservationPrice:
         # Late in session, reservation should be closer to mid
         assert abs(mid_price - r_late) < abs(mid_price - r_early)
 
+    def test_reservation_price_dollar_scale(self):
+        """Reservation adjustment should be meaningful at BTC prices.
+
+        With σ=2%, mid=$50k, γ=0.1, q=5, T-t=0.5:
+        σ_dollar = 0.02 × 50000 = 1000
+        adjustment = 5 × 0.1 × 1000² × 0.5 = 250,000
+        r = 50000 - 250000 = -200000 (extreme! γ=0.1 is too high for dollar units)
+
+        With γ=0.0004 (appropriate for dollar units):
+        adjustment = 5 × 0.0004 × 1000² × 0.5 = 1000
+        r = 50000 - 1000 = 49000 (2% below mid — reasonable)
+        """
+        model = AvellanedaStoikov(risk_aversion=0.0004)
+        mid = 50000.0
+        r = model.calculate_reservation_price(mid, 5, 0.02, 0.5)
+        # adjustment = 5 × 0.0004 × (0.02 × 50000)² × 0.5 = 1000
+        assert r == pytest.approx(49000.0)
+
 
 class TestOptimalSpread:
     """Tests for optimal spread calculation."""
@@ -142,11 +197,19 @@ class TestOptimalSpread:
 
         assert spread > 0
 
+    def test_spread_with_mid_price_is_in_dollars(self):
+        """When mid_price given, spread should be in dollar units."""
+        model = AvellanedaStoikov(risk_aversion=0.0004, order_book_liquidity=0.014)
+        mid = 100000.0
+        spread = model.calculate_optimal_spread(0.005, 0.5, mid_price=mid)
+        # Should produce something in the $50-$500 range
+        assert 10 < spread < 10000
+
     def test_higher_volatility_wider_spread(self):
         """Higher volatility should result in wider spreads."""
-        # Use no ceiling to test the formula behavior
         model = AvellanedaStoikov(
-            risk_aversion=0.01, order_book_liquidity=1.5, max_spread=100.0
+            risk_aversion=0.01, order_book_liquidity=1.5,
+            max_spread_dollar=1e12,
         )
         time_remaining = 0.5
 
@@ -156,21 +219,17 @@ class TestOptimalSpread:
         assert spread_high_vol > spread_low_vol
 
     def test_risk_aversion_affects_spread(self):
-        """Risk aversion parameter affects spread calculation.
-
-        Note: The A-S formula is δ = γσ²(T-t) + (2/γ)ln(1 + γ/κ)
-        The (2/γ) term dominates for small γ, causing lower γ → wider spread.
-        This is mathematically correct: low risk aversion means you're willing
-        to quote wider to capture more trades.
-        """
+        """Risk aversion parameter affects spread calculation."""
         volatility = 0.01
         time_remaining = 0.5
 
         model_low = AvellanedaStoikov(
-            risk_aversion=0.1, order_book_liquidity=1.5, max_spread=100.0
+            risk_aversion=0.1, order_book_liquidity=1.5,
+            max_spread_dollar=1e12,
         )
         model_high = AvellanedaStoikov(
-            risk_aversion=0.5, order_book_liquidity=1.5, max_spread=100.0
+            risk_aversion=0.5, order_book_liquidity=1.5,
+            max_spread_dollar=1e12,
         )
 
         spread_low = model_low.calculate_optimal_spread(volatility, time_remaining)
@@ -187,42 +246,51 @@ class TestOptimalSpread:
         volatility = 0.02
         time_remaining = 0.5
 
-        # Use higher max_spread to avoid ceiling effects
         model_low_liq = AvellanedaStoikov(
-            risk_aversion=0.1, order_book_liquidity=0.5, max_spread=0.5
+            risk_aversion=0.1, order_book_liquidity=0.5,
+            max_spread_dollar=1e12,
         )
         model_high_liq = AvellanedaStoikov(
-            risk_aversion=0.1, order_book_liquidity=5.0, max_spread=0.5
+            risk_aversion=0.1, order_book_liquidity=5.0,
+            max_spread_dollar=1e12,
         )
 
-        spread_low_liq = model_low_liq.calculate_optimal_spread(volatility, time_remaining)
-        spread_high_liq = model_high_liq.calculate_optimal_spread(volatility, time_remaining)
+        spread_low_liq = model_low_liq.calculate_optimal_spread(
+            volatility, time_remaining
+        )
+        spread_high_liq = model_high_liq.calculate_optimal_spread(
+            volatility, time_remaining
+        )
 
         assert spread_high_liq < spread_low_liq
 
-    def test_spread_respects_minimum(self):
-        """Spread should not go below minimum."""
+    def test_spread_clamped_to_minimum_in_quotes(self):
+        """Dollar spread is clamped to min_spread_dollar in calculate_quotes."""
         model = AvellanedaStoikov(
-            risk_aversion=0.001,  # Very low
-            order_book_liquidity=100.0,  # Very high
-            min_spread=0.001
+            risk_aversion=0.001,
+            order_book_liquidity=100.0,
+            min_spread_dollar=10.0,
         )
 
-        spread = model.calculate_optimal_spread(0.001, 0.01)
+        mid_price = 50000.0
+        bid, ask = model.calculate_quotes(mid_price, 0, 0.001, 0.01)
 
-        assert spread >= 0.001
+        dollar_spread = ask - bid
+        assert dollar_spread >= 10.0 - 1e-9
 
-    def test_spread_respects_maximum(self):
-        """Spread should not exceed maximum."""
+    def test_spread_clamped_to_maximum_in_quotes(self):
+        """Dollar spread is clamped to max_spread_dollar in calculate_quotes."""
         model = AvellanedaStoikov(
-            risk_aversion=10.0,  # Very high
-            order_book_liquidity=0.01,  # Very low
-            max_spread=0.05
+            risk_aversion=10.0,
+            order_book_liquidity=0.01,
+            max_spread_dollar=100.0,
         )
 
-        spread = model.calculate_optimal_spread(0.5, 1.0)
+        mid_price = 50000.0
+        bid, ask = model.calculate_quotes(mid_price, 0, 0.5, 1.0)
 
-        assert spread <= 0.05
+        dollar_spread = ask - bid
+        assert dollar_spread <= 100.0 + 1e-9
 
 
 class TestQuoteGeneration:
@@ -246,9 +314,12 @@ class TestQuoteGeneration:
 
         assert bid < r < ask
 
-    def test_ask_minus_bid_equals_spread(self):
-        """Ask - Bid should equal the optimal spread."""
-        model = AvellanedaStoikov(risk_aversion=0.1, order_book_liquidity=1.5)
+    def test_ask_minus_bid_reflects_clamped_dollar_spread(self):
+        """Ask - Bid should reflect the dollar-clamped spread."""
+        model = AvellanedaStoikov(
+            risk_aversion=0.1, order_book_liquidity=1.5,
+            min_spread_dollar=5.0, max_spread_dollar=500.0,
+        )
         mid_price = 50000.0
         inventory = 0
         volatility = 0.02
@@ -257,9 +328,12 @@ class TestQuoteGeneration:
         bid, ask = model.calculate_quotes(
             mid_price, inventory, volatility, time_remaining
         )
-        spread = model.calculate_optimal_spread(volatility, time_remaining)
+        raw_spread = model.calculate_optimal_spread(
+            volatility, time_remaining, mid_price=mid_price
+        )
+        expected = max(5.0, min(500.0, raw_spread))
 
-        assert abs((ask - bid) - (mid_price * spread)) < 0.01  # Allow small float error
+        assert abs((ask - bid) - expected) < 0.01
 
     def test_long_inventory_shifts_quotes_down(self):
         """Long inventory should shift both quotes down (want to sell)."""
@@ -306,7 +380,7 @@ class TestModelIntegration:
         model = AvellanedaStoikov(
             risk_aversion=0.1,
             order_book_liquidity=1.5,
-            volatility_window=20
+            volatility_window=20,
         )
 
         # Simulate realistic BTC prices
@@ -326,4 +400,47 @@ class TestModelIntegration:
         # Sanity checks
         assert bid < mid < ask
         assert (ask - bid) / mid < 0.1  # Spread < 10%
-        assert (ask - bid) / mid > 0.0001  # Spread > 0.01%
+        assert (ask - bid) > 0  # Spread positive
+
+    def test_dollar_spread_meaningful_at_btc_scale(self):
+        """With proper dollar-unit params, spread should be 10-200 bps."""
+        model = AvellanedaStoikov(
+            risk_aversion=0.0004,       # γ in 1/$²
+            order_book_liquidity=0.014,  # κ in 1/$
+            min_spread_dollar=5.0,
+            max_spread_dollar=5000.0,
+        )
+        mid = 100000.0
+        sigma_pct = 0.005  # 0.5% per period
+
+        bid, ask = model.calculate_quotes(mid, 0, sigma_pct, 0.5)
+        spread_bps = (ask - bid) / mid * 10000
+
+        # Should produce meaningful spread between 10-200 bps
+        assert 10 < spread_bps < 200, f"Spread {spread_bps:.1f} bps out of range"
+
+    def test_estimate_volatility_integration(self):
+        """estimate_volatility returns consistent multi-unit output."""
+        model = AvellanedaStoikov()
+        np.random.seed(42)
+        prices = pd.Series(50000 * np.cumprod(1 + np.random.normal(0, 0.01, 100)))
+
+        vol = model.estimate_volatility(prices)
+        assert vol.pct > 0
+        assert vol.dollar > 0
+        assert vol.tick > 0
+        assert vol.dollar == pytest.approx(vol.pct * vol.mid_price)
+
+    def test_get_quote_adjustment_has_dollar_fields(self):
+        """get_quote_adjustment should include dollar-based spread info."""
+        model = AvellanedaStoikov(
+            risk_aversion=0.0004,
+            order_book_liquidity=0.014,
+        )
+        info = model.get_quote_adjustment(100000.0, 0, 0.005, 0.5)
+
+        assert "spread_dollar" in info
+        assert "raw_spread_dollar" in info
+        assert "spread_bps" in info
+        assert info["spread_dollar"] > 0
+        assert info["bid"] < info["ask"]

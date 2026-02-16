@@ -6,6 +6,7 @@ Usage:
 """
 
 import argparse
+import os
 import pandas as pd
 import ccxt
 from pathlib import Path
@@ -38,9 +39,15 @@ def download_ohlcv(
 
     # Initialize exchange
     exchange_class = getattr(ccxt, exchange_id)
-    exchange = exchange_class({
-        'enableRateLimit': True,
-    })
+    config = {'enableRateLimit': True}
+
+    # Use SOCKS5 proxy if configured (for geo-blocked exchanges like Bybit)
+    proxy = os.getenv('SOCKS5_PROXY')
+    if proxy:
+        config['proxies'] = {'http': proxy, 'https': proxy}
+        print(f"Using proxy: {proxy.split('@')[-1] if '@' in proxy else proxy}")
+
+    exchange = exchange_class(config)
 
     # Calculate start time
     since = exchange.parse8601(
