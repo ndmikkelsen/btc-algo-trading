@@ -51,12 +51,14 @@ from strategies.avellaneda_stoikov.config_optimized import (
     USE_REGIME_FILTER,
     ADX_TREND_THRESHOLD,
 )
+from strategies.avellaneda_stoikov.db import TradingDB
 from strategies.avellaneda_stoikov.config import (
     BAD_TICK_THRESHOLD,
     DISPLACEMENT_THRESHOLD,
     DISPLACEMENT_LOOKBACK,
     DISPLACEMENT_AGGRESSION,
     DISPLACEMENT_MAX_MULT,
+    DISPLACEMENT_MIN_MULT,
     INVENTORY_SOFT_LIMIT,
     INVENTORY_HARD_LIMIT,
     FILL_COOLDOWN_SECONDS,
@@ -111,6 +113,8 @@ class TraderState:
     ask_price: Optional[float] = None
     bid_order_id: Optional[str] = None
     ask_order_id: Optional[str] = None
+    market_bid: float = 0.0
+    market_ask: float = 0.0
     inventory: float = 0.0
     cash: float = 0.0
     total_pnl: float = 0.0
@@ -241,7 +245,7 @@ class LiveTrader:
             # Futures mode: use constant kappa (no orderbook calibration yet)
             from strategies.avellaneda_stoikov.kappa_provider import ConstantKappaProvider
             self.kappa_provider: KappaProvider = kappa_provider or ConstantKappaProvider(
-                kappa=0.5, A=50.0
+                kappa=0.05, A=20.0
             )
         else:
             self.kappa_provider: KappaProvider = kappa_provider or LiveKappaProvider(
@@ -306,6 +310,11 @@ class LiveTrader:
         self._last_asymmetric_state: Optional[str] = None
         self._last_asymmetric_log_time: float = 0.0
         self._last_displacement_log_time: float = 0.0
+
+        # Database tracking (optional — no-ops if DATABASE_URL unset)
+        self._db = TradingDB()
+        self._start_time: Optional[datetime] = None
+        self._log_path: Optional[str] = None
 
         # Threading
         self._stop_event = threading.Event()
@@ -378,6 +387,8 @@ class LiveTrader:
             ask = float(ticker.get("ask") or ticker.get("ask1Price") or 0)
             if bid > 0 and ask > 0:
                 self.state.current_spread = (ask - bid) / bid
+                self.state.market_bid = bid
+                self.state.market_ask = ask
 
             self.state.last_update = datetime.now()
 
@@ -454,7 +465,10 @@ class LiveTrader:
                 / DISPLACEMENT_THRESHOLD,
             )
             return mult
-        return 1.0
+
+        # Calm market: tighten proportionally (floor at DISPLACEMENT_MIN_MULT)
+        calm_ratio = displacement / DISPLACEMENT_THRESHOLD
+        return DISPLACEMENT_MIN_MULT + (1.0 - DISPLACEMENT_MIN_MULT) * calm_ratio
 
     def _calculate_realized_volatility(self) -> float:
         """Calculate realized volatility from recent price returns."""
@@ -892,13 +906,14 @@ class LiveTrader:
 
         # Phase 1: Price displacement guard - widen spread during fast moves
         disp_mult = self._calculate_displacement_multiplier()
-        if disp_mult > 1.0:
+        if disp_mult != 1.0:
             half_spread *= disp_mult
             now = time.time()
             if now - self._last_displacement_log_time > 60:
+                action = "widened" if disp_mult > 1.0 else "tightened"
                 print(
                     f"[{datetime.now()}] DISPLACEMENT GUARD: "
-                    f"spread widened {disp_mult:.1f}×"
+                    f"spread {action} {disp_mult:.2f}×"
                 )
                 self._last_displacement_log_time = now
 
@@ -999,18 +1014,21 @@ class LiveTrader:
                 elif inv < 0 and abs(inv) >= q_hard:
                     skip_sell = True
 
-            # Check if quotes changed significantly or no orders on book
-            # Threshold: 1 bps (0.01%) — must be tighter than half-spread to keep
-            # orders near the market. At 5 bps spread, half-spread is ~2.5 bps.
+            # Smart cancel: only replace orders if the new quote moved enough.
+            # Threshold: 3 bps (0.03%) — keeps orders resting longer so the
+            # fill simulation has time to trigger. At typical 5-7 bps spreads,
+            # half-spread is ~2.5-3.5 bps, so orders stay within one spread-width
+            # of the model price.
+            REQUOTE_THRESHOLD = 0.0003  # 3 bps
             should_update = False
             no_orders = (self.state.bid_order_id is None and self.state.ask_order_id is None)
             if no_orders:
                 should_update = True  # Always re-quote when no orders are active
             elif self.state.bid_price is None or self.state.ask_price is None:
                 should_update = True
-            elif abs(bid - self.state.bid_price) / self.state.bid_price > 0.0001:
+            elif abs(bid - self.state.bid_price) / self.state.bid_price > REQUOTE_THRESHOLD:
                 should_update = True
-            elif abs(ask - self.state.ask_price) / self.state.ask_price > 0.0001:
+            elif abs(ask - self.state.ask_price) / self.state.ask_price > REQUOTE_THRESHOLD:
                 should_update = True
 
             if not should_update:
@@ -1129,6 +1147,16 @@ class LiveTrader:
                 self._realized_pnl += pnl
                 self._closed_trades += 1
 
+                # Buffer round-trip for DB
+                self._db.add_round_trip(
+                    entry_side="long" if prev_inv > 0 else "short",
+                    entry_price=self._avg_entry_price,
+                    exit_price=price,
+                    qty=close_qty,
+                    pnl=pnl,
+                    hold_time_seconds=0.0,  # TODO: track per-entry timestamps
+                )
+
                 if pnl >= 0:
                     print(
                         f"{Colors.GREEN}💰 [{timestamp}] TRADE CLOSED: "
@@ -1162,8 +1190,12 @@ class LiveTrader:
         """Check for order fills and update state."""
         try:
             if self.dry_run:
-                # In dry-run mode, use simulated fill checking
-                fills = self.client.check_fills(self.state.current_price)
+                # In dry-run mode, use simulated fill checking with bid/ask
+                if self.state.market_bid == 0 or self.state.market_ask == 0:
+                    return  # Not yet populated
+                fills = self.client.check_fills(
+                    bid=self.state.market_bid, ask=self.state.market_ask
+                )
 
                 # Verbose: log fill check attempts
                 if not fills and self.state.trades_count == 0:
@@ -1214,6 +1246,13 @@ class LiveTrader:
                             f"Inventory: {self.state.inventory:+.6f} BTC{Colors.RESET}"
                         )
 
+                        # Buffer fill for DB
+                        self._db.add_fill(
+                            order_id=order_id, side=fill_side, qty=qty,
+                            price=price, fee=fee,
+                            inventory_after=self.state.inventory,
+                        )
+
                         # Per-trade PnL reporting
                         self._process_trade_pnl(fill_side, qty, price, fee)
             else:
@@ -1262,6 +1301,13 @@ class LiveTrader:
                             f"{color}{Colors.BOLD}{emoji} [{datetime.now().strftime('%H:%M:%S')}] FILL: {side.upper()} "
                             f"{qty:.6f} BTC @ ${price:.2f} | Fee: ${fee:.4f} | "
                             f"Inventory: {self.state.inventory:+.6f} BTC{Colors.RESET}"
+                        )
+
+                        # Buffer fill for DB
+                        self._db.add_fill(
+                            order_id=order_id, side=fill_side, qty=qty,
+                            price=price, fee=fee,
+                            inventory_after=self.state.inventory,
                         )
 
                         # Per-trade PnL reporting
@@ -1384,6 +1430,9 @@ class LiveTrader:
 
         print("=" * 60)
 
+        # Record session start time for DB tracking
+        self._start_time = datetime.now()
+
         # Start quote loop (polls market data inline)
         self._stop_event.clear()
         self._quote_thread = threading.Thread(target=self._quote_loop)
@@ -1403,6 +1452,47 @@ class LiveTrader:
         self._cancel_all_orders()
 
         self.state.is_running = False
+
+        # Finalize DB instance (writes all buffered data in one transaction)
+        end_time = datetime.now()
+        duration = (
+            (end_time - self._start_time).total_seconds()
+            if self._start_time
+            else 0.0
+        )
+        kappa, arrival_rate = self.kappa_provider.get_kappa()
+        self._db.finalize_instance(
+            {
+                "gamma": getattr(self.model, "risk_aversion", None),
+                "kappa": kappa,
+                "arrival_rate": arrival_rate,
+                "min_spread": getattr(self.model, "min_spread_dollar", None),
+                "max_spread": getattr(self.model, "max_spread_dollar", None),
+                "quote_interval": self.quote_interval,
+                "fee_tier": self.fee_model.tier.value,
+                "leverage": self.leverage,
+                "use_regime_filter": self.use_regime_filter,
+                "capital": self.initial_capital,
+                "order_pct": self.order_pct,
+                "symbol": self.symbol,
+                "exchange": "bybit" if self.use_futures else "mexc",
+                "is_dry_run": self.dry_run,
+                "start_time": self._start_time,
+                "end_time": end_time,
+                "duration_seconds": duration,
+                "final_price": self.state.current_price,
+                "final_inventory": self.state.inventory,
+                "final_cash": self.state.cash,
+                "total_pnl": self.state.total_pnl,
+                "realized_pnl": self._realized_pnl,
+                "total_fees": self.state.total_fees,
+                "trades_count": self.state.trades_count,
+                "closed_trades": self._closed_trades,
+                "tick_rejections": self._tick_rejection_count,
+                "error_count": len(self.state.errors),
+                "log_file": self._log_path,
+            }
+        )
 
         # Print summary
         self._print_summary()

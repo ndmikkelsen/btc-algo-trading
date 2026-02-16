@@ -10,6 +10,7 @@
 
 services:
   trader:
+    container_name: btc-algo-trader
     build:
       context: .
       dockerfile: Dockerfile
@@ -25,6 +26,7 @@ services:
       - INITIAL_CAPITAL=${INITIAL_CAPITAL:-1000}
       - ORDER_SIZE=${ORDER_SIZE:-0.003}
       - QUOTE_INTERVAL=${QUOTE_INTERVAL:-5.0}
+      - DATABASE_URL=postgresql://trader:${TRADER_DB_PASSWORD:-trader}@trader-db:5432/trader
     restart: unless-stopped
     logging:
       driver: json-file
@@ -33,3 +35,27 @@ services:
         max-file: "3"
     volumes:
       - ./logs:/app/logs
+    depends_on:
+      trader-db:
+        condition: service_healthy
+
+  trader-db:
+    container_name: btc-algo-trader-db
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: trader
+      POSTGRES_PASSWORD: ${TRADER_DB_PASSWORD:-trader}
+      POSTGRES_DB: trader
+    volumes:
+      - trader-db-data:/var/lib/postgresql/data
+    ports:
+      - "5437:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trader"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  trader-db-data:
