@@ -35,7 +35,7 @@ VOLATILITY_METHOD = 'standard'
 # Higher = denser order book, smaller spreads needed
 # Lower = sparser order book, wider spreads allowed
 # Typical range: 1.0 - 10.0
-ORDER_BOOK_LIQUIDITY = 1.5
+ORDER_BOOK_LIQUIDITY = 0.05
 
 # =============================================================================
 # Tick Size (MEXC BTCUSDT)
@@ -139,6 +139,7 @@ DISPLACEMENT_THRESHOLD = 0.001  # 0.1% move triggers widening
 DISPLACEMENT_LOOKBACK = 6       # ticks (6 × 5s = 30s at default interval)
 DISPLACEMENT_AGGRESSION = 2.0   # widening multiplier per threshold unit
 DISPLACEMENT_MAX_MULT = 3.0     # max spread multiplier
+DISPLACEMENT_MIN_MULT = 0.85    # min spread multiplier (calm market tightening)
 
 # Inventory limits (multiples of order_size)
 INVENTORY_SOFT_LIMIT = 2   # start reducing order size
@@ -158,7 +159,7 @@ FILL_COOLDOWN_SECONDS = 3.0  # seconds to wait after a fill before re-quoting
 # Dynamic gamma: adjust risk aversion based on realized volatility
 DYNAMIC_GAMMA_ENABLED = True
 VOLATILITY_LOOKBACK = 20        # ticks for realized vol calculation
-VOLATILITY_REFERENCE = 0.005    # reference volatility (0.5%) for gamma scaling
+VOLATILITY_REFERENCE = 0.0001   # reference volatility (~0.01%) for gamma scaling at 1s intervals
 GAMMA_MIN_MULT = 0.5           # min gamma multiplier (during low vol)
 GAMMA_MAX_MULT = 3.0           # max gamma multiplier (during high vol)
 
