@@ -348,14 +348,12 @@ class DryRunFuturesClient:
             Ticker dict from real market
         """
         try:
-            print(f"[DEBUG] Fetching ticker for {symbol}...")
             ticker = self.exchange.fetch_ticker(symbol)
-            print(f"[DEBUG] Ticker fetched: last={ticker.get('last', 0)}")
             return ticker
         except Exception as e:
-            print(f"Error fetching ticker: {e}")
-            import traceback
-            traceback.print_exc()
+            # Log network errors concisely (no traceback spam)
+            err_msg = str(e).split('\n')[0][:120]
+            print(f"[{symbol}] Ticker error: {err_msg}")
             # Return dummy data if market fetch fails
             return {
                 'last': 0,
@@ -427,7 +425,7 @@ class DryRunFuturesClient:
             'symbol': symbol,
             'side': side,
             'amount': amount,
-            'price': price,
+            'price': float(price) if price is not None else 0.0,
             'type': order_type,
             'status': 'open',
             'timestamp': time.time()
@@ -493,11 +491,20 @@ class DryRunFuturesClient:
         """
         return list(self.open_orders.values())
 
-    def check_fills(self, current_price: float) -> List[Dict]:
-        """Check if any orders should fill at current price.
+    def check_fills(self, bid: float, ask: float) -> List[Dict]:
+        """Check if any orders should fill based on market bid/ask.
+
+        Uses deterministic fill model:
+        - Buy limit fills when market ask <= order price (sellers willing at our level)
+        - Sell limit fills when market bid >= order price (buyers willing at our level)
+
+        No probabilistic gating — if the market reaches your limit price, you're
+        filled. This is realistic for a market maker: your resting limit order
+        gets lifted when the opposing side crosses to your price level.
 
         Args:
-            current_price: Current market price
+            bid: Current best bid price
+            ask: Current best ask price
 
         Returns:
             List of filled orders
@@ -505,22 +512,21 @@ class DryRunFuturesClient:
         fills = []
 
         for order_id, order in list(self.open_orders.items()):
-            filled = False
-
-            # Check if order would fill
             if order['side'] in ('buy', 'Buy'):
-                # Buy fills when price drops to or below limit
-                if current_price <= order['price']:
-                    filled = True
+                # Buy limit fills when market ask drops to our buy level
+                if ask > order['price']:
+                    continue
             elif order['side'] in ('sell', 'Sell'):
-                # Sell fills when price rises to or above limit
-                if current_price >= order['price']:
-                    filled = True
+                # Sell limit fills when market bid rises to our sell level
+                if bid < order['price']:
+                    continue
+            else:
+                continue
 
-            if filled:
-                fill_data = self._execute_fill(order, current_price)
-                fills.append(fill_data)
-                del self.open_orders[order_id]
+            # Deterministic fill at limit price
+            fill_data = self._execute_fill(order, order['price'])
+            fills.append(fill_data)
+            del self.open_orders[order_id]
 
         return fills
 
