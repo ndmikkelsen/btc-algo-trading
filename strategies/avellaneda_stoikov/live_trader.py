@@ -172,16 +172,13 @@ class LiveTrader:
         self.use_futures = use_futures
         self.leverage = leverage
 
-        # Warn if order value is too small for exchange minimum
-        if use_futures:
-            min_notional = BYBIT_MIN_ORDER_SIZE * 100000  # ~$97 at $97k BTC
-            if self.order_value_usdt < min_notional:
-                print(
-                    f"⚠️ WARNING: Order value ${self.order_value_usdt:.2f} < "
-                    f"minimum notional ~${min_notional:.0f} "
-                    f"(Bybit min {BYBIT_MIN_ORDER_SIZE} BTC). "
-                    f"All orders will be placed at minimum size."
-                )
+        # Note if order value will result in minimum-size orders
+        if use_futures and self.order_value_usdt > 0:
+            # Bybit minimum is quantity-based (0.001 BTC), not notional
+            print(
+                f"ℹ️ Order size: ${self.order_value_usdt:.2f} USDT "
+                f"(min qty: {BYBIT_MIN_ORDER_SIZE} BTC)"
+            )
 
         # Create exchange client (MEXC spot or Bybit futures)
         if use_futures:
@@ -310,6 +307,9 @@ class LiveTrader:
         self._last_asymmetric_state: Optional[str] = None
         self._last_asymmetric_log_time: float = 0.0
         self._last_displacement_log_time: float = 0.0
+        self._last_imbalance_state: Optional[str] = None  # 'buy', 'sell', or None
+        self._last_imbalance_ratio: float = 0.0
+        self._last_imbalance_log_time: float = 0.0
 
         # Database tracking (optional — no-ops if DATABASE_URL unset)
         self._db = TradingDB()
@@ -780,7 +780,7 @@ class LiveTrader:
         if not should_reduce:
             return
 
-        # Reduce entire inventory via market order
+        # Reduce entire inventory — try limit order first, escalate to market
         reduce_qty = abs(inv)
         if self.use_futures:
             reduce_qty = math.floor(reduce_qty / BYBIT_LOT_SIZE) * BYBIT_LOT_SIZE
@@ -796,15 +796,45 @@ class LiveTrader:
             f"{Colors.YELLOW}{Colors.BOLD}⚠️ [{timestamp}] INVENTORY REDUCTION: "
             f"{reason}{Colors.RESET}"
         )
-        print(
-            f"{color}{Colors.BOLD}{emoji} [{timestamp}] MARKET {side.upper()} "
-            f"(inventory reduction): {reduce_qty:.6f} BTC{Colors.RESET}"
-        )
 
         self._last_inventory_reduce = now
 
+        # Stage 1: Try aggressive limit order (mid ± 2 bps)
+        mid = self.state.current_price
+        offset = mid * 0.0002  # 2 bps
+        limit_price = mid - offset if side == 'sell' else mid + offset
+
         try:
             if not self.dry_run:
+                print(
+                    f"{color}{Colors.BOLD}{emoji} [{timestamp}] LIMIT {side.upper()} "
+                    f"(inventory reduction): {reduce_qty:.6f} BTC @ ${limit_price:,.2f}{Colors.RESET}"
+                )
+                self.client.place_order(
+                    symbol=self.symbol,
+                    side=side,
+                    amount=reduce_qty,
+                    price=limit_price,
+                    order_type='limit',
+                )
+                # Wait up to 30s for the limit order to fill
+                for _ in range(6):
+                    time.sleep(5)
+                    # Check if inventory was reduced (fill detected by _check_fills)
+                    current_inv = self.state.inventory
+                    if abs(current_inv) < abs(inv) * 0.5:
+                        print(
+                            f"{Colors.GREEN}✓ [{datetime.now().strftime('%H:%M:%S')}] "
+                            f"Limit reduction filled{Colors.RESET}"
+                        )
+                        return
+                # Stage 2: Limit didn't fill — cancel and use market order
+                self._cancel_all_orders()
+                print(
+                    f"{color}{Colors.BOLD}{emoji} [{datetime.now().strftime('%H:%M:%S')}] "
+                    f"MARKET {side.upper()} (limit didn't fill, escalating): "
+                    f"{reduce_qty:.6f} BTC{Colors.RESET}"
+                )
                 self.client.place_order(
                     symbol=self.symbol,
                     side=side,
@@ -812,7 +842,11 @@ class LiveTrader:
                     order_type='market',
                 )
             else:
-                # Simulate immediate fill at current price
+                # Dry-run: simulate immediate fill at current price (market order)
+                print(
+                    f"{color}{Colors.BOLD}{emoji} [{timestamp}] MARKET {side.upper()} "
+                    f"(inventory reduction): {reduce_qty:.6f} BTC{Colors.RESET}"
+                )
                 current_price = self.state.current_price
                 if hasattr(self.client, '_execute_fill'):
                     order = {
@@ -888,6 +922,15 @@ class LiveTrader:
             gamma_mult = max(GAMMA_MIN_MULT, min(GAMMA_MAX_MULT, gamma_mult))
             self.model.risk_aversion = original_gamma * gamma_mult
 
+        # Phase 2.5: Inventory-age gamma scaling — progressively widen spreads
+        # to encourage mean-reversion before forced reduction triggers
+        if self._inventory_start_time > 0 and abs(self.state.inventory) > 1e-8:
+            inv_hold_time = time.time() - self._inventory_start_time
+            if inv_hold_time > 780:  # 13 min: very aggressive
+                self.model.risk_aversion *= 5.0
+            elif inv_hold_time > 600:  # 10 min: moderately aggressive
+                self.model.risk_aversion *= 2.0
+
         # Time remaining (GLFT ignores this; A-S uses 24h session midpoint)
         time_remaining = 0.5
 
@@ -953,22 +996,49 @@ class LiveTrader:
         # Phase 2: Fill imbalance - widen side getting filled too often
         imbalance_ratio, imbalance_side = self._calculate_fill_imbalance()
         if imbalance_side:
+            # Determine if we should log (only when state changes or after 60s)
+            now = time.time()
+            should_log = False
+
+            # Log if imbalance side changed
+            if imbalance_side != self._last_imbalance_state:
+                should_log = True
+            # Log if ratio changed significantly (>10%)
+            elif abs(imbalance_ratio - self._last_imbalance_ratio) > 0.10:
+                should_log = True
+            # Log if at least 60 seconds have passed
+            elif now - self._last_imbalance_log_time >= 60.0:
+                should_log = True
+
             if imbalance_side == 'buy':  # Too many buys, widen bid
                 spread_width = ask - bid
                 bid = mid - (spread_width / 2) * IMBALANCE_WIDENING
                 ask = mid + (spread_width / 2)
-                print(
-                    f"[{datetime.now()}] FILL IMBALANCE: {imbalance_ratio:.0%} buys, "
-                    f"widening bid"
-                )
+                if should_log:
+                    print(
+                        f"[{datetime.now()}] FILL IMBALANCE: {imbalance_ratio:.0%} buys, "
+                        f"widening bid"
+                    )
+                    self._last_imbalance_state = imbalance_side
+                    self._last_imbalance_ratio = imbalance_ratio
+                    self._last_imbalance_log_time = now
             elif imbalance_side == 'sell':  # Too many sells, widen ask
                 spread_width = ask - bid
                 bid = mid - (spread_width / 2)
                 ask = mid + (spread_width / 2) * IMBALANCE_WIDENING
-                print(
-                    f"[{datetime.now()}] FILL IMBALANCE: {imbalance_ratio:.0%} sells, "
-                    f"widening ask"
-                )
+                if should_log:
+                    print(
+                        f"[{datetime.now()}] FILL IMBALANCE: {imbalance_ratio:.0%} sells, "
+                        f"widening ask"
+                    )
+                    self._last_imbalance_state = imbalance_side
+                    self._last_imbalance_ratio = imbalance_ratio
+                    self._last_imbalance_log_time = now
+        else:
+            # Reset state when no imbalance (for clean state change detection next time)
+            if self._last_imbalance_state is not None:
+                self._last_imbalance_state = None
+                self._last_imbalance_ratio = 0.0
 
         return bid, ask
 
@@ -1315,6 +1385,10 @@ class LiveTrader:
 
         except Exception as e:
             self.state.errors.append(f"Fill check error: {e}")
+            # Log first error and every 10th to avoid spam
+            err_count = len(self.state.errors)
+            if err_count == 1 or err_count % 10 == 0:
+                print(f"{Colors.YELLOW}⚠️ Fill check error ({err_count}x): {e}{Colors.RESET}")
 
     def _quote_loop(self):
         """Main loop for updating quotes."""
@@ -1433,6 +1507,23 @@ class LiveTrader:
         # Record session start time for DB tracking
         self._start_time = datetime.now()
 
+        # Pre-seed processed fills to avoid re-processing historical orders (live mode only)
+        if not self.dry_run:
+            try:
+                print(f"{Colors.CYAN}[{datetime.now().strftime('%H:%M:%S')}] "
+                      f"Loading historical orders...{Colors.RESET}")
+                historical_orders = self.client.get_order_history(self.symbol, limit=50)
+                skipped_count = 0
+                for order in historical_orders:
+                    order_id = order.get("orderId")
+                    if order_id and order.get("orderStatus") == "Filled":
+                        self._processed_fills.add(order_id)
+                        skipped_count += 1
+                print(f"{Colors.GREEN}✓ [{datetime.now().strftime('%H:%M:%S')}] "
+                      f"Pre-seeded {skipped_count} historical fills — only new fills will be processed{Colors.RESET}")
+            except Exception as e:
+                print(f"{Colors.YELLOW}⚠️ Warning: Could not pre-seed historical fills: {e}{Colors.RESET}")
+
         # Start quote loop (polls market data inline)
         self._stop_event.clear()
         self._quote_thread = threading.Thread(target=self._quote_loop)
@@ -1499,6 +1590,8 @@ class LiveTrader:
 
     def _print_summary(self):
         """Print trading session summary."""
+        unrealized_pnl = self.state.inventory * self.state.current_price if self.state.current_price > 0 else 0.0
+
         print()
         print("=" * 60)
         print("SESSION SUMMARY")
@@ -1508,12 +1601,16 @@ class LiveTrader:
         print(f"Final Price:     ${self.state.current_price:,.2f}")
         print(f"Final Inventory: {self.state.inventory:.6f} BTC")
         print(f"Final Cash:      ${self.state.cash:,.2f}")
-        print(f"Total P&L:       ${self.state.total_pnl:,.2f}")
         print(f"Realized P&L:    ${self._realized_pnl:,.2f} ({self._closed_trades} round-trips)")
+        print(f"Unrealized P&L:  ${unrealized_pnl:,.2f} ({self.state.inventory:.6f} BTC @ ${self.state.current_price:,.2f})")
+        print(f"Total P&L:       ${self.state.total_pnl:,.2f} (realized + unrealized)")
         print(f"Total Fees:      ${self.state.total_fees:,.4f}")
         print(f"Total Trades:    {self.state.trades_count}")
         print(f"Ticks Rejected:  {self._tick_rejection_count}")
         print(f"Errors:          {len(self.state.errors)}")
+        # Warn if state looks inconsistent
+        if abs(self.state.inventory) > 1e-8 and self.state.trades_count == 0:
+            print(f"{Colors.YELLOW}⚠️ WARNING: Inventory ≠ 0 but no fills recorded — fill detection may have failed{Colors.RESET}")
         print("=" * 60)
 
     def get_status(self) -> Dict:
