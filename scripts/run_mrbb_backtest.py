@@ -23,6 +23,9 @@ from strategies.mean_reversion_bb.config import (
     KC_PERIOD,
     KC_ATR_MULTIPLIER,
     RSI_PERIOD,
+    ADX_PERIOD,
+    ADX_THRESHOLD,
+    USE_REGIME_FILTER,
 )
 from strategies.avellaneda_stoikov.metrics import (
     sharpe_ratio,
@@ -45,13 +48,21 @@ def load_data(data_path: str) -> pd.DataFrame:
         print(f"Error: data file not found: {path}", file=sys.stderr)
         sys.exit(1)
 
-    df = pd.read_csv(path, parse_dates=["timestamp"], index_col="timestamp")
-    required = {"open", "high", "low", "close", "volume"}
+    df = pd.read_csv(path)
+    required = {"open", "high", "low", "close", "volume", "timestamp"}
     missing = required - set(df.columns)
     if missing:
         print(f"Error: CSV missing columns: {missing}", file=sys.stderr)
         sys.exit(1)
 
+    # Handle both Unix ms timestamps and ISO datetime strings
+    ts = df["timestamp"]
+    if pd.api.types.is_numeric_dtype(ts):
+        df["timestamp"] = pd.to_datetime(ts, unit="ms", utc=True)
+    else:
+        df["timestamp"] = pd.to_datetime(ts)
+
+    df = df.set_index("timestamp")
     return df
 
 
@@ -83,6 +94,9 @@ def run_backtest(
     kc_period: int = KC_PERIOD,
     kc_atr_multiplier: float = KC_ATR_MULTIPLIER,
     rsi_period: int = RSI_PERIOD,
+    adx_period: int = ADX_PERIOD,
+    adx_threshold: float = ADX_THRESHOLD,
+    use_regime_filter: bool = USE_REGIME_FILTER,
     slippage_pct: float = 0.0005,
     random_seed: int = 42,
     verbose: bool = True,
@@ -96,6 +110,9 @@ def run_backtest(
         kc_period=kc_period,
         kc_atr_multiplier=kc_atr_multiplier,
         rsi_period=rsi_period,
+        adx_period=adx_period,
+        adx_threshold=adx_threshold,
+        use_regime_filter=use_regime_filter,
     )
 
     sim = DirectionalSimulator(
@@ -114,10 +131,11 @@ def run_backtest(
         print(f"VWAP period: {vwap_period}")
         print(f"KC: period={kc_period}, ATR mult={kc_atr_multiplier}")
         print(f"RSI period: {rsi_period}")
+        print(f"ADX: period={adx_period}, threshold={adx_threshold}, filter={'ON' if use_regime_filter else 'OFF'}")
         print(f"Slippage: {slippage_pct * 100:.2f}%")
         print()
 
-    results = sim.run_backtest(df)
+    results = sim.run_backtest_fast(df)
 
     # Performance metrics from equity curve
     ec = results["equity_curve"]
@@ -147,6 +165,9 @@ def run_backtest(
             "kc_period": kc_period,
             "kc_atr_multiplier": kc_atr_multiplier,
             "rsi_period": rsi_period,
+            "adx_period": adx_period,
+            "adx_threshold": adx_threshold,
+            "use_regime_filter": use_regime_filter,
             "slippage_pct": slippage_pct,
         },
     }
@@ -220,6 +241,10 @@ def main():
     parser.add_argument("--kc-period", type=int, default=KC_PERIOD)
     parser.add_argument("--kc-atr-mult", type=float, default=KC_ATR_MULTIPLIER)
     parser.add_argument("--rsi-period", type=int, default=RSI_PERIOD)
+    parser.add_argument("--adx-period", type=int, default=ADX_PERIOD)
+    parser.add_argument("--adx-threshold", type=float, default=ADX_THRESHOLD)
+    parser.add_argument("--no-regime-filter", action="store_true",
+                        help="Disable ADX regime filter")
     parser.add_argument("--slippage", type=float, default=0.0005, help="Slippage fraction")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--output", default=None, help="Output directory (default: backtests/mrbb/)")
@@ -243,6 +268,9 @@ def main():
         kc_period=args.kc_period,
         kc_atr_multiplier=args.kc_atr_mult,
         rsi_period=args.rsi_period,
+        adx_period=args.adx_period,
+        adx_threshold=args.adx_threshold,
+        use_regime_filter=not args.no_regime_filter,
         slippage_pct=args.slippage,
         random_seed=args.seed,
         verbose=not args.quiet,

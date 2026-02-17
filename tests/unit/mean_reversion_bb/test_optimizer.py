@@ -115,7 +115,7 @@ class TestApplyParamsToModel:
         model = _apply_params_to_model({})
         # Should use config defaults
         assert model.bb_period == 20
-        assert model.bb_std_dev == 2.0
+        assert model.bb_std_dev == 2.5
 
     def test_ignores_non_constructor_params(self):
         # These are valid registry params but not in MeanReversionBB constructor

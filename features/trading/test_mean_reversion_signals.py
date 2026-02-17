@@ -190,7 +190,9 @@ def ctx():
 
 @given("a default MeanReversionBB model", target_fixture="ctx")
 def given_default_mrbb(ctx):
-    ctx.model = MeanReversionBB()
+    # Disable regime filter so BDD tests exercise signal logic
+    # independent of ADX-based filtering (tested separately in unit tests)
+    ctx.model = MeanReversionBB(bb_std_dev=2.0, use_regime_filter=False)
     return ctx
 
 

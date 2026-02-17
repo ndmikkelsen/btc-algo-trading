@@ -80,14 +80,15 @@ class TestParamRegistry:
         return ParamRegistry()
 
     def test_all_params_registered(self, registry):
-        """All 17 tunable parameters from config.py are registered."""
-        assert len(registry.params) == 17
+        """All 19 tunable parameters from config.py are registered."""
+        assert len(registry.params) == 19
 
     def test_expected_param_names(self, registry):
         expected = {
             "bb_period", "bb_std_dev", "bb_inner_std_dev", "ma_type",
             "vwap_period", "vwap_confirmation_pct",
             "kc_period", "kc_atr_multiplier", "min_squeeze_duration",
+            "adx_period", "adx_threshold",
             "rsi_period", "rsi_oversold", "rsi_overbought",
             "reversion_target", "max_holding_bars",
             "risk_per_trade", "max_position_pct", "stop_atr_multiplier",
@@ -106,6 +107,8 @@ class TestParamRegistry:
         assert defaults["kc_period"] == config.KC_PERIOD
         assert defaults["kc_atr_multiplier"] == config.KC_ATR_MULTIPLIER
         assert defaults["min_squeeze_duration"] == config.MIN_SQUEEZE_DURATION
+        assert defaults["adx_period"] == config.ADX_PERIOD
+        assert defaults["adx_threshold"] == config.ADX_THRESHOLD
         assert defaults["rsi_period"] == config.RSI_PERIOD
         assert defaults["rsi_oversold"] == config.RSI_OVERSOLD
         assert defaults["rsi_overbought"] == config.RSI_OVERBOUGHT

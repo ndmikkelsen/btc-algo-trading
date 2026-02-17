@@ -70,7 +70,7 @@ class ParamRegistry:
         """Register all tunable parameters."""
         # Bollinger Band parameters
         self._register(ParamSpec("bb_period", 20, 10, 50, 5, "int", description="BB moving average period"))
-        self._register(ParamSpec("bb_std_dev", 2.0, 1.5, 3.0, 0.25, "float", description="BB outer band std dev multiplier"))
+        self._register(ParamSpec("bb_std_dev", 2.5, 1.5, 3.0, 0.25, "float", description="BB outer band std dev multiplier"))
         self._register(ParamSpec("bb_inner_std_dev", 1.0, 0.5, 1.5, 0.25, "float", description="BB inner band std dev multiplier"))
         self._register(ParamSpec("ma_type", "sma", param_type="choice", choices=["sma", "ema", "wma"], description="Moving average type"))
 
@@ -83,17 +83,21 @@ class ParamRegistry:
         self._register(ParamSpec("kc_atr_multiplier", 1.5, 1.0, 3.0, 0.25, "float", description="KC ATR multiplier"))
         self._register(ParamSpec("min_squeeze_duration", 6, 3, 12, 1, "int", description="Min squeeze candles before fire"))
 
+        # Regime filter parameters
+        self._register(ParamSpec("adx_period", 14, 7, 21, 1, "int", description="ADX calculation period"))
+        self._register(ParamSpec("adx_threshold", 22.0, 15.0, 35.0, 1.0, "float", description="ADX threshold for ranging regime"))
+
         # Signal parameters
         self._register(ParamSpec("rsi_period", 14, 7, 21, 1, "int", description="RSI calculation period"))
         self._register(ParamSpec("rsi_oversold", 30, 20, 40, 5, "int", description="RSI oversold threshold"))
         self._register(ParamSpec("rsi_overbought", 70, 60, 80, 5, "int", description="RSI overbought threshold"))
-        self._register(ParamSpec("reversion_target", 0.8, 0.5, 1.0, 0.1, "float", description="Mean reversion target (fraction of distance)"))
+        self._register(ParamSpec("reversion_target", 0.9, 0.5, 1.0, 0.1, "float", description="Mean reversion target (fraction of distance)"))
         self._register(ParamSpec("max_holding_bars", 50, 20, 100, 10, "int", description="Max bars to hold position"))
 
         # Risk parameters
         self._register(ParamSpec("risk_per_trade", 0.02, 0.01, 0.05, 0.005, "float", description="Risk per trade as fraction of equity"))
         self._register(ParamSpec("max_position_pct", 0.25, 0.10, 0.50, 0.05, "float", description="Max position as fraction of equity"))
-        self._register(ParamSpec("stop_atr_multiplier", 1.5, 1.0, 3.0, 0.25, "float", description="Stop loss ATR multiplier"))
+        self._register(ParamSpec("stop_atr_multiplier", 2.5, 1.0, 3.0, 0.25, "float", description="Stop loss ATR multiplier"))
 
     def _register(self, spec: ParamSpec):
         self.params[spec.name] = spec

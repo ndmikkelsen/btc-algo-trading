@@ -72,6 +72,9 @@ from strategies.mean_reversion_bb.config import (
     RISK_PER_TRADE,
     MAX_POSITION_PCT,
     STOP_ATR_MULTIPLIER,
+    ADX_PERIOD,
+    ADX_THRESHOLD,
+    USE_REGIME_FILTER,
 )
 
 
@@ -101,6 +104,17 @@ class MeanReversionBB(DirectionalModel):
         kc_period: int = KC_PERIOD,
         kc_atr_multiplier: float = KC_ATR_MULTIPLIER,
         rsi_period: int = RSI_PERIOD,
+        adx_period: int = ADX_PERIOD,
+        adx_threshold: float = ADX_THRESHOLD,
+        use_regime_filter: bool = USE_REGIME_FILTER,
+        rsi_oversold: float = RSI_OVERSOLD,
+        rsi_overbought: float = RSI_OVERBOUGHT,
+        vwap_confirmation_pct: float = VWAP_CONFIRMATION_PCT,
+        stop_atr_multiplier: float = STOP_ATR_MULTIPLIER,
+        reversion_target: float = REVERSION_TARGET,
+        max_holding_bars: int = MAX_HOLDING_BARS,
+        risk_per_trade: float = RISK_PER_TRADE,
+        max_position_pct: float = MAX_POSITION_PCT,
     ):
         self.bb_period = bb_period
         self.bb_std_dev = bb_std_dev
@@ -109,6 +123,17 @@ class MeanReversionBB(DirectionalModel):
         self.kc_period = kc_period
         self.kc_atr_multiplier = kc_atr_multiplier
         self.rsi_period = rsi_period
+        self.adx_period = adx_period
+        self.adx_threshold = adx_threshold
+        self.use_regime_filter = use_regime_filter
+        self.rsi_oversold = rsi_oversold
+        self.rsi_overbought = rsi_overbought
+        self.vwap_confirmation_pct = vwap_confirmation_pct
+        self.stop_atr_multiplier = stop_atr_multiplier
+        self.reversion_target = reversion_target
+        self.max_holding_bars = max_holding_bars
+        self.risk_per_trade = risk_per_trade
+        self.max_position_pct = max_position_pct
 
         # State
         self.squeeze_count: int = 0
@@ -265,6 +290,57 @@ class MeanReversionBB(DirectionalModel):
         rsi = 100 - (100 / (1 + rs))
         return rsi
 
+    def calculate_adx(
+        self,
+        high: pd.Series,
+        low: pd.Series,
+        close: pd.Series,
+    ) -> Tuple[float, float, float]:
+        """Calculate ADX (Average Directional Index) for regime detection.
+
+        ADX < threshold indicates ranging market (favorable for mean reversion).
+        ADX >= threshold indicates trending market (avoid MR entries).
+
+        Args:
+            high: High prices
+            low: Low prices
+            close: Close prices
+
+        Returns:
+            Tuple of (adx, plus_di, minus_di) for the last bar
+        """
+        prev_high = high.shift(1)
+        prev_low = low.shift(1)
+        prev_close = close.shift(1)
+
+        tr = pd.concat([
+            high - low,
+            (high - prev_close).abs(),
+            (low - prev_close).abs(),
+        ], axis=1).max(axis=1)
+
+        plus_dm = high - prev_high
+        minus_dm = prev_low - low
+        plus_dm = plus_dm.where((plus_dm > minus_dm) & (plus_dm > 0), 0.0)
+        minus_dm = minus_dm.where((minus_dm > plus_dm) & (minus_dm > 0), 0.0)
+
+        alpha = 1 / self.adx_period
+        atr = tr.ewm(alpha=alpha, min_periods=self.adx_period, adjust=False).mean()
+        smooth_plus = plus_dm.ewm(alpha=alpha, min_periods=self.adx_period, adjust=False).mean()
+        smooth_minus = minus_dm.ewm(alpha=alpha, min_periods=self.adx_period, adjust=False).mean()
+
+        plus_di = 100 * smooth_plus / atr
+        minus_di = 100 * smooth_minus / atr
+
+        dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di)
+        adx = dx.ewm(alpha=alpha, min_periods=self.adx_period, adjust=False).mean()
+
+        last_adx = float(adx.iloc[-1]) if not pd.isna(adx.iloc[-1]) else 0.0
+        last_plus = float(plus_di.iloc[-1]) if not pd.isna(plus_di.iloc[-1]) else 0.0
+        last_minus = float(minus_di.iloc[-1]) if not pd.isna(minus_di.iloc[-1]) else 0.0
+
+        return (last_adx, last_plus, last_minus)
+
     def calculate_signals(
         self,
         high: pd.Series,
@@ -312,6 +388,8 @@ class MeanReversionBB(DirectionalModel):
         vwap = self.calculate_vwap(high, low, close, volume)
         is_squeeze, squeeze_duration = self.detect_squeeze(high, low, close)
         rsi = self._calculate_rsi(close)
+        adx_value, plus_di, minus_di = self.calculate_adx(high, low, close)
+        is_ranging = adx_value < self.adx_threshold
 
         # Get last values
         last_close = close.iloc[-1]
@@ -348,21 +426,26 @@ class MeanReversionBB(DirectionalModel):
             # The fire is detected by the caller tracking state across calls
             pass
 
+        # Regime filter: only allow entries in ranging markets
+        regime_ok = is_ranging or not self.use_regime_filter
+
         # Long condition
         if (
             last_close <= last_lower_outer
-            and last_rsi < RSI_OVERSOLD
-            and vwap_deviation < VWAP_CONFIRMATION_PCT
+            and last_rsi < self.rsi_oversold
+            and vwap_deviation < self.vwap_confirmation_pct
             and not is_squeeze
+            and regime_ok
         ):
             signal = "long"
 
         # Short condition
         elif (
             last_close >= last_upper_outer
-            and last_rsi > RSI_OVERBOUGHT
-            and vwap_deviation < VWAP_CONFIRMATION_PCT
+            and last_rsi > self.rsi_overbought
+            and vwap_deviation < self.vwap_confirmation_pct
             and not is_squeeze
+            and regime_ok
         ):
             signal = "short"
 
@@ -374,6 +457,8 @@ class MeanReversionBB(DirectionalModel):
             "is_squeeze": is_squeeze,
             "squeeze_duration": squeeze_duration,
             "bandwidth_percentile": bandwidth_percentile,
+            "adx": adx_value,
+            "is_ranging": is_ranging,
             "middle": last_middle,
             "upper_outer": last_upper_outer,
             "lower_outer": last_lower_outer,
@@ -406,14 +491,14 @@ class MeanReversionBB(DirectionalModel):
         side = signal["signal"]
 
         if side == "long":
-            stop_loss = signal.get("lower_outer", current_price) - STOP_ATR_MULTIPLIER * atr
-            target = current_price + REVERSION_TARGET * (signal["middle"] - current_price)
+            stop_loss = signal.get("lower_outer", current_price) - self.stop_atr_multiplier * atr
+            target = current_price + self.reversion_target * (signal["middle"] - current_price)
             partial_target = signal.get(
                 "lower_inner", (current_price + signal["middle"]) / 2
             )
         elif side == "short":
-            stop_loss = signal.get("upper_outer", current_price) + STOP_ATR_MULTIPLIER * atr
-            target = current_price - REVERSION_TARGET * (current_price - signal["middle"])
+            stop_loss = signal.get("upper_outer", current_price) + self.stop_atr_multiplier * atr
+            target = current_price - self.reversion_target * (current_price - signal["middle"])
             partial_target = signal.get(
                 "upper_inner", (current_price + signal["middle"]) / 2
             )
@@ -422,8 +507,8 @@ class MeanReversionBB(DirectionalModel):
 
         stop_distance = abs(current_price - stop_loss)
         if stop_distance > 0:
-            risk_size = RISK_PER_TRADE * equity / stop_distance
-            max_size = MAX_POSITION_PCT * equity / current_price
+            risk_size = self.risk_per_trade * equity / stop_distance
+            max_size = self.max_position_pct * equity / current_price
             position_size = min(risk_size, max_size)
         else:
             position_size = 0.0
@@ -471,7 +556,7 @@ class MeanReversionBB(DirectionalModel):
         self.bars_held += 1
 
         # Max holding period
-        if self.bars_held >= MAX_HOLDING_BARS:
+        if self.bars_held >= self.max_holding_bars:
             return {"action": "exit", "reason": "max holding period exceeded"}
 
         # Squeeze while in position
@@ -507,6 +592,8 @@ class MeanReversionBB(DirectionalModel):
             "position_side": self.position_side,
             "entry_price": self.entry_price,
             "bars_held": self.bars_held,
-            "risk_per_trade": RISK_PER_TRADE,
-            "reversion_target": REVERSION_TARGET,
+            "risk_per_trade": self.risk_per_trade,
+            "reversion_target": self.reversion_target,
+            "adx_threshold": self.adx_threshold,
+            "use_regime_filter": self.use_regime_filter,
         }

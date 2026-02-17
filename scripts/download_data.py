@@ -15,6 +15,9 @@ from datetime import datetime, timezone
 
 import ccxt
 import pandas as pd
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 # Bybit API returns max 200 candles per request
@@ -43,8 +46,11 @@ def init_exchange() -> ccxt.bybit:
 
     proxy = os.getenv("SOCKS5_PROXY")
     if proxy:
+        # Use socks5h:// to resolve DNS through the proxy (critical for geo-blocking)
+        if proxy.startswith("socks5://"):
+            proxy = proxy.replace("socks5://", "socks5h://", 1)
         config["proxies"] = {"http": proxy, "https": proxy}
-        print(f"Using proxy: {proxy}")
+        print(f"Using proxy: ...{proxy[-30:]}")
 
     return ccxt.bybit(config)
 

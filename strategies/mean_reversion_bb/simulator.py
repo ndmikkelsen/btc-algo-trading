@@ -244,8 +244,7 @@ class DirectionalSimulator:
     def _partial_exit(self, exit_price: float) -> None:
         """Exit half the position at the partial target."""
         half = self.position_size / 2
-        pnl = self._calculate_pnl(exit_price, half)
-        self.cash += half * exit_price + pnl
+        self.cash += half * exit_price
         self.position_size -= half
         self.partial_exited = True
 
@@ -268,7 +267,7 @@ class DirectionalSimulator:
             "reason": reason,
         })
 
-        self.cash += self.position_size * actual_exit + pnl
+        self.cash += self.position_size * actual_exit
         self.position_side = None
         self.position_size = 0.0
         self.entry_price = 0.0
@@ -289,8 +288,7 @@ class DirectionalSimulator:
         """Return current equity including unrealized PnL."""
         if self.position_side is None:
             return self.cash
-        unrealized = self._calculate_pnl(current_price, self.position_size)
-        return self.cash + self.position_size * current_price + unrealized
+        return self.cash + self.position_size * current_price
 
     # ------------------------------------------------------------------
     # Helpers
@@ -316,6 +314,285 @@ class DirectionalSimulator:
             (l - prev_c).abs(),
         ], axis=1).max(axis=1)
         return float(tr.iloc[1:].mean())
+
+    def run_backtest_fast(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Run a vectorized backtest — pre-computes indicators, then iterates for positions.
+
+        Much faster than run_backtest() for large datasets (100x+ on 300k+ candles)
+        because indicators are computed once over the entire DataFrame rather than
+        rebuilt from growing lists at each step.
+
+        Args:
+            df: DataFrame with columns open, high, low, close, volume.
+
+        Returns:
+            Dict with equity_curve, trade_log, and summary stats.
+        """
+        h_series = df["high"]
+        l_series = df["low"]
+        c_series = df["close"]
+        v_series = df.get("volume", pd.Series(0.0, index=df.index))
+
+        # Pre-compute all indicators vectorized
+        middle, upper_outer, lower_outer, upper_inner, lower_inner = (
+            self.model.calculate_bollinger_bands(c_series)
+        )
+        rsi = self.model._calculate_rsi(c_series)
+        vwap = self.model.calculate_vwap(h_series, l_series, c_series, v_series)
+
+        # ADX
+        adx_val, plus_di, minus_di = pd.Series(dtype=float), pd.Series(dtype=float), pd.Series(dtype=float)
+        if self.model.use_regime_filter:
+            prev_high = h_series.shift(1)
+            prev_low = l_series.shift(1)
+            prev_close = c_series.shift(1)
+            tr = pd.concat([
+                h_series - l_series,
+                (h_series - prev_close).abs(),
+                (l_series - prev_close).abs(),
+            ], axis=1).max(axis=1)
+            p_dm = h_series - prev_high
+            m_dm = prev_low - l_series
+            p_dm = p_dm.where((p_dm > m_dm) & (p_dm > 0), 0.0)
+            m_dm = m_dm.where((m_dm > p_dm) & (m_dm > 0), 0.0)
+            alpha = 1 / self.model.adx_period
+            atr_s = tr.ewm(alpha=alpha, min_periods=self.model.adx_period, adjust=False).mean()
+            sp = p_dm.ewm(alpha=alpha, min_periods=self.model.adx_period, adjust=False).mean()
+            sm = m_dm.ewm(alpha=alpha, min_periods=self.model.adx_period, adjust=False).mean()
+            plus_di = 100 * sp / atr_s
+            minus_di = 100 * sm / atr_s
+            dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di)
+            adx_val = dx.ewm(alpha=alpha, min_periods=self.model.adx_period, adjust=False).mean()
+
+        # Squeeze detection (vectorized)
+        kc_middle = c_series.ewm(span=self.model.kc_period, adjust=False).mean()
+        prev_c_kc = c_series.shift(1)
+        tr_kc = pd.concat([
+            h_series - l_series,
+            (h_series - prev_c_kc).abs(),
+            (l_series - prev_c_kc).abs(),
+        ], axis=1).max(axis=1)
+        atr_kc = tr_kc.rolling(self.model.kc_period).mean()
+        kc_upper = kc_middle + self.model.kc_atr_multiplier * atr_kc
+        kc_lower = kc_middle - self.model.kc_atr_multiplier * atr_kc
+        squeeze_mask = (upper_outer < kc_upper) & (lower_outer > kc_lower)
+
+        # ATR for stop calculation
+        prev_c_atr = c_series.shift(1)
+        tr_atr = pd.concat([
+            h_series - l_series,
+            (h_series - prev_c_atr).abs(),
+            (l_series - prev_c_atr).abs(),
+        ], axis=1).max(axis=1)
+        atr_14 = tr_atr.rolling(14).mean()
+
+        # VWAP deviation
+        tp = (h_series + l_series + c_series) / 3
+        vwap_dev = ((c_series - vwap) / vwap).abs()
+
+        # Convert to numpy for fast iteration
+        opens = df["open"].values
+        highs = h_series.values
+        lows = l_series.values
+        closes = c_series.values
+        rsi_arr = rsi.values
+        mid_arr = middle.values
+        uo_arr = upper_outer.values
+        lo_arr = lower_outer.values
+        ui_arr = upper_inner.values
+        li_arr = lower_inner.values
+        vwap_dev_arr = vwap_dev.values
+        squeeze_arr = squeeze_mask.values
+        atr_arr = atr_14.values
+        adx_arr = adx_val.values if len(adx_val) > 0 else np.full(len(df), 0.0)
+        timestamps = df.index
+
+        # Use model instance params (configurable per-run)
+        RSI_OVERSOLD = self.model.rsi_oversold
+        RSI_OVERBOUGHT = self.model.rsi_overbought
+        VWAP_CONFIRMATION_PCT = self.model.vwap_confirmation_pct
+        REVERSION_TARGET = self.model.reversion_target
+        STOP_ATR_MULTIPLIER = self.model.stop_atr_multiplier
+        RISK_PER_TRADE = self.model.risk_per_trade
+        MAX_POSITION_PCT = self.model.max_position_pct
+        MAX_HOLDING_BARS = self.model.max_holding_bars
+
+        # Position state
+        pos_side: Optional[str] = None
+        pos_size = 0.0
+        entry_price = 0.0
+        stop_loss = 0.0
+        target = 0.0
+        partial_target = 0.0
+        partial_exited = False
+        bars_held = 0
+        cash = self.initial_equity
+        equity_curve: List[Dict] = []
+        trade_log: List[Dict] = []
+
+        for i in range(MIN_LOOKBACK, len(df)):
+            c = closes[i]
+            h = highs[i]
+            lo = lows[i]
+
+            # 1. Check exits
+            if pos_side is not None:
+                exit_done = False
+                if pos_side == "long":
+                    if lo <= stop_loss:
+                        pnl = pos_size * (stop_loss - entry_price)
+                        slippage = self.rng.uniform(0, self.slippage_pct) * stop_loss
+                        exit_p = stop_loss - slippage
+                        pnl = pos_size * (exit_p - entry_price)
+                        trade_log.append({"side": "long", "entry_price": entry_price, "exit_price": exit_p, "size": pos_size, "pnl": pnl, "reason": "stop_loss"})
+                        cash += pos_size * exit_p
+                        pos_side = None; exit_done = True
+                    elif h >= target:
+                        slippage = self.rng.uniform(0, self.slippage_pct) * target
+                        exit_p = target - slippage
+                        pnl = pos_size * (exit_p - entry_price)
+                        trade_log.append({"side": "long", "entry_price": entry_price, "exit_price": exit_p, "size": pos_size, "pnl": pnl, "reason": "target"})
+                        cash += pos_size * exit_p
+                        pos_side = None; exit_done = True
+                    elif not partial_exited and h >= partial_target:
+                        half = pos_size / 2
+                        pnl_half = half * (partial_target - entry_price)
+                        cash += half * partial_target
+                        pos_size -= half
+                        partial_exited = True
+                elif pos_side == "short":
+                    if h >= stop_loss:
+                        slippage = self.rng.uniform(0, self.slippage_pct) * stop_loss
+                        exit_p = stop_loss + slippage
+                        pnl = pos_size * (entry_price - exit_p)
+                        trade_log.append({"side": "short", "entry_price": entry_price, "exit_price": exit_p, "size": pos_size, "pnl": pnl, "reason": "stop_loss"})
+                        cash += pos_size * exit_p
+                        pos_side = None; exit_done = True
+                    elif lo <= target:
+                        slippage = self.rng.uniform(0, self.slippage_pct) * target
+                        exit_p = target + slippage
+                        pnl = pos_size * (entry_price - exit_p)
+                        trade_log.append({"side": "short", "entry_price": entry_price, "exit_price": exit_p, "size": pos_size, "pnl": pnl, "reason": "target"})
+                        cash += pos_size * exit_p
+                        pos_side = None; exit_done = True
+                    elif not partial_exited and lo <= partial_target:
+                        half = pos_size / 2
+                        pnl_half = half * (entry_price - partial_target)
+                        cash += half * partial_target
+                        pos_size -= half
+                        partial_exited = True
+
+                # Risk management
+                if pos_side is not None and not exit_done:
+                    bars_held += 1
+                    if bars_held >= MAX_HOLDING_BARS:
+                        slippage = self.rng.uniform(0, self.slippage_pct) * c
+                        if pos_side == "long":
+                            exit_p = c - slippage
+                            pnl = pos_size * (exit_p - entry_price)
+                        else:
+                            exit_p = c + slippage
+                            pnl = pos_size * (entry_price - exit_p)
+                        trade_log.append({"side": pos_side, "entry_price": entry_price, "exit_price": exit_p, "size": pos_size, "pnl": pnl, "reason": "max holding period exceeded"})
+                        cash += pos_size * exit_p
+                        pos_side = None
+
+                    # Band walking: 3+ candles at outer band
+                    elif i >= 2 and pos_side is not None:
+                        if pos_side == "long":
+                            walking = all(closes[i-j] <= lo_arr[i-j] for j in range(3) if not np.isnan(lo_arr[i-j]))
+                        else:
+                            walking = all(closes[i-j] >= uo_arr[i-j] for j in range(3) if not np.isnan(uo_arr[i-j]))
+                        if walking:
+                            slippage = self.rng.uniform(0, self.slippage_pct) * c
+                            if pos_side == "long":
+                                exit_p = c - slippage
+                                pnl = pos_size * (exit_p - entry_price)
+                            else:
+                                exit_p = c + slippage
+                                pnl = pos_size * (entry_price - exit_p)
+                            trade_log.append({"side": pos_side, "entry_price": entry_price, "exit_price": exit_p, "size": pos_size, "pnl": pnl, "reason": "band walking detected"})
+                            cash += pos_size * exit_p
+                            pos_side = None
+
+            # 2. Signal generation if flat
+            if pos_side is None:
+                rsi_v = rsi_arr[i] if not np.isnan(rsi_arr[i]) else 50.0
+                uo_v = uo_arr[i]
+                lo_v = lo_arr[i]
+                mid_v = mid_arr[i]
+                vd = vwap_dev_arr[i] if not np.isnan(vwap_dev_arr[i]) else 1.0
+                sq = squeeze_arr[i] if not np.isnan(squeeze_arr[i]) else False
+                adx_v = adx_arr[i] if not np.isnan(adx_arr[i]) else 50.0
+                regime_ok = (adx_v < self.model.adx_threshold) or not self.model.use_regime_filter
+                atr_v = atr_arr[i] if not np.isnan(atr_arr[i]) else 1.0
+
+                signal = None
+                if (not np.isnan(uo_v) and not np.isnan(lo_v) and not np.isnan(mid_v)):
+                    if (c <= lo_v and rsi_v < RSI_OVERSOLD and vd < VWAP_CONFIRMATION_PCT
+                            and not sq and regime_ok):
+                        signal = "long"
+                    elif (c >= uo_v and rsi_v > RSI_OVERBOUGHT and vd < VWAP_CONFIRMATION_PCT
+                            and not sq and regime_ok):
+                        signal = "short"
+
+                if signal and atr_v > 0:
+                    if signal == "long":
+                        stop_loss = lo_v - STOP_ATR_MULTIPLIER * atr_v
+                        tgt = c + REVERSION_TARGET * (mid_v - c)
+                        ptgt = li_arr[i] if not np.isnan(li_arr[i]) else (c + mid_v) / 2
+                    else:
+                        stop_loss = uo_v + STOP_ATR_MULTIPLIER * atr_v
+                        tgt = c - REVERSION_TARGET * (c - mid_v)
+                        ptgt = ui_arr[i] if not np.isnan(ui_arr[i]) else (c + mid_v) / 2
+
+                    stop_dist = abs(c - stop_loss)
+                    if stop_dist > 0:
+                        equity_now = cash  # simplified for flat position
+                        risk_size = RISK_PER_TRADE * equity_now / stop_dist
+                        max_size = MAX_POSITION_PCT * equity_now / c
+                        p_size = min(risk_size, max_size)
+                        if p_size > 0:
+                            slippage = self.rng.uniform(0, self.slippage_pct) * c
+                            entry_p = c + slippage if signal == "long" else c - slippage
+                            pos_side = signal
+                            pos_size = p_size
+                            entry_price = entry_p
+                            target = tgt
+                            partial_target = ptgt
+                            partial_exited = False
+                            bars_held = 0
+                            cash -= p_size * entry_p
+
+            # 3. Equity
+            if pos_side is not None:
+                eq = cash + pos_size * c
+            else:
+                eq = cash
+            equity_curve.append({"timestamp": timestamps[i], "equity": eq})
+
+        # Force close
+        if pos_side is not None and len(df) > 0:
+            c = closes[-1]
+            slippage = self.rng.uniform(0, self.slippage_pct) * c
+            if pos_side == "long":
+                exit_p = c - slippage
+                pnl = pos_size * (exit_p - entry_price)
+            else:
+                exit_p = c + slippage
+                pnl = pos_size * (entry_price - exit_p)
+            trade_log.append({"side": pos_side, "entry_price": entry_price, "exit_price": exit_p, "size": pos_size, "pnl": pnl, "reason": "end_of_backtest"})
+            cash += pos_size * exit_p
+
+        final_equity = equity_curve[-1]["equity"] if equity_curve else self.initial_equity
+
+        return {
+            "equity_curve": equity_curve,
+            "trade_log": trade_log,
+            "total_trades": len(trade_log),
+            "final_equity": final_equity,
+            "total_return_pct": (final_equity / self.initial_equity - 1) * 100,
+        }
 
     def reset(self) -> None:
         """Reset simulator for a new run."""

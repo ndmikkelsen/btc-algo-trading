@@ -85,7 +85,7 @@ class TestCalculateSignals:
 
     def test_long_signal_on_oversold(self):
         """Long signal should fire when price at lower band + RSI oversold + VWAP ok."""
-        model = MeanReversionBB()
+        model = MeanReversionBB(bb_std_dev=2.0, use_regime_filter=False)
         high, low, close, volume = make_oversold_data()
         sig = model.calculate_signals(high, low, close, volume)
         # RSI should be low
@@ -99,7 +99,7 @@ class TestCalculateSignals:
 
     def test_short_signal_on_overbought(self):
         """Short signal should fire when price at upper band + RSI overbought + VWAP ok."""
-        model = MeanReversionBB()
+        model = MeanReversionBB(bb_std_dev=2.0, use_regime_filter=False)
         high, low, close, volume = make_overbought_data()
         sig = model.calculate_signals(high, low, close, volume)
         assert sig["rsi"] > RSI_OVERBOUGHT

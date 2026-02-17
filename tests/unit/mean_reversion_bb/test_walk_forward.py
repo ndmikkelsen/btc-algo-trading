@@ -122,7 +122,7 @@ class TestModelBuilding:
         params = wfo.registry.to_dict()
         model = wfo._build_model(params)
         assert model.bb_period == 20
-        assert model.bb_std_dev == 2.0
+        assert model.bb_std_dev == 2.5
 
     def test_build_model_with_custom_params(self):
         df = _make_ohlcv(months=12)
