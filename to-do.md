@@ -39,19 +39,6 @@ kanban-plugin: board
   > - Half-life estimation
   >
   > This is a skeleton implementation that needs to be completed before the stat arb strategy can be used.
-- [ ] Tune A-S parameters from paper trading results #p2
-  > Adjust Avellaneda-Stoikov parameters based on paper trading observations.
-  >
-  > ## Parameters to Evaluate
-  > - Risk aversion (γ) - currently 0.1
-  > - Volatility window - currently 20 candles
-  > - MIN_SPREAD - currently 0.4% (optimized config)
-  > - ADX threshold - currently 25 for regime filter
-  >
-  > ## Goals
-  > - Improve fill rate while maintaining profitability
-  > - Reduce inventory risk exposure
-  > - Optimize for Sharpe ratio in live conditions
 - [ ] Track per-entry timestamps for round-trip hold_time_seconds #p2
   > Branch: test/paper-test
   >
@@ -61,38 +48,14 @@ kanban-plugin: board
 
 ## Medium Priority - #p1
 
-- [ ] Prepare for live trading deployment #p1
-  > Set up infrastructure for real money trading on Bybit mainnet.
-  >
-  > ## Checklist
-  > - [ ] Create Bybit mainnet API keys (read + trade permissions)
-  > - [ ] Configure mainnet credentials securely (env vars, not in code)
-  > - [ ] Set initial capital allocation (start small: $500-1000)
-  > - [ ] Implement kill switch / emergency stop
-  > - [ ] Set up monitoring and alerting
-  > - [ ] Document risk limits and stop-loss rules
-  >
-  > ## Risk Management
-  > - Max position size limits
-  > - Daily loss limits
-  > - Automatic shutdown on anomalies
-- [ ] Run A-S paper trading on Bybit testnet #p1
-  > Validate Avellaneda-Stoikov strategy in live market conditions using Bybit testnet paper trading.
-  >
-  > ## Acceptance Criteria
-  > - Run paper trader for minimum 1 week
-  > - Monitor fill rates, spread capture, and inventory management
-  > - Track P&L vs backtest expectations
-  > - Identify any issues with live execution (latency, WebSocket stability)
-  >
-  > ## Resources
-  > - scripts/run_paper_trader.py
-  > - strategies/avellaneda_stoikov/live_trader.py
-  > - config_hft.py settings
+- [ ] Live trade MRBB with small capital on Bybit #p1
+- [ ] Epic: MRBB Strategy — Research, Backtest, Tune, Deploy #p1
 
 ## High Priority - #p0
 
 ## In Progress
+
+- [ ] Paper trade MRBB on live Bybit data (dry-run) #p1
 
 ## Done
 
@@ -117,6 +80,16 @@ kanban-plugin: board
   > 1. Verify position shows 0.000 BTC on Bybit
   > 2. Run btc-algo-trading-iib (resume live trading)
   > 3. Monitor for systemic fix validation
+- [x] Re-validate optimized parameters with CPCV and WFO #p1
+- [x] Analyze parameter sensitivity and select optimal set #p1
+- [x] Parameter grid search optimization #p1
+- [x] Run CPCV for overfitting detection #p1
+- [x] Run Monte Carlo simulation for robustness #p1
+- [x] Run walk-forward optimization on historical data #p1
+- [x] Analyze backtest results by market regime #p1
+- [x] Run initial backtest on full historical dataset #p1
+- [x] Identify market regime periods in historical data #p1
+- [x] Download 2+ years of 5m BTC/USDT data from Bybit #p1
 - [x] Investigate 90-min dry spell between fills #p1
 - [x] Fix PnL tracking desync after inventory reductions #p1
 - [x] Add colored trade reporting and per-trade PnL display #p1
@@ -141,6 +114,34 @@ kanban-plugin: board
   > - Bot won't go one-sided after 1 fill (inventory limits corrected)
   > - Order sizing transparent ( notional, not misleading )
   > - Client-side validation prevents future violations
+- [x] Prepare for live trading deployment #p1
+  > Set up infrastructure for real money trading on Bybit mainnet.
+  >
+  > ## Checklist
+  > - [ ] Create Bybit mainnet API keys (read + trade permissions)
+  > - [ ] Configure mainnet credentials securely (env vars, not in code)
+  > - [ ] Set initial capital allocation (start small: $500-1000)
+  > - [ ] Implement kill switch / emergency stop
+  > - [ ] Set up monitoring and alerting
+  > - [ ] Document risk limits and stop-loss rules
+  >
+  > ## Risk Management
+  > - Max position size limits
+  > - Daily loss limits
+  > - Automatic shutdown on anomalies
+- [x] Run A-S paper trading on Bybit testnet #p1
+  > Validate Avellaneda-Stoikov strategy in live market conditions using Bybit testnet paper trading.
+  >
+  > ## Acceptance Criteria
+  > - Run paper trader for minimum 1 week
+  > - Monitor fill rates, spread capture, and inventory management
+  > - Track P&L vs backtest expectations
+  > - Identify any issues with live execution (latency, WebSocket stability)
+  >
+  > ## Resources
+  > - scripts/run_paper_trader.py
+  > - strategies/avellaneda_stoikov/live_trader.py
+  > - config_hft.py settings
 - [x] Backtest BTCMomentumScalper strategy #p1
 - [x] Download Binance BTC/USDT data (2017-present) #p1
 - [x] Verify backtesting works with sample data #p1
@@ -149,7 +150,22 @@ kanban-plugin: board
 - [x] Backtesting Pipeline Setup #p1
 - [x] Configure Cognee knowledge base for btc-algo-trading #p1
   > Set up isolated Cognee stack with unique ports, update all scripts and documentation to use btc-specific datasets and configuration.
+- [x] Run statistical significance tests #p2
+- [x] Research optimal BB parameter ranges from literature #p2
 - [x] Suppress asymmetric spread log noise #p2
+- [x] Tune A-S parameters from paper trading results #p2
+  > Adjust Avellaneda-Stoikov parameters based on paper trading observations.
+  >
+  > ## Parameters to Evaluate
+  > - Risk aversion (γ) - currently 0.1
+  > - Volatility window - currently 20 candles
+  > - MIN_SPREAD - currently 0.4% (optimized config)
+  > - ADX threshold - currently 25 for regime filter
+  >
+  > ## Goals
+  > - Improve fill rate while maintaining profitability
+  > - Reduce inventory risk exposure
+  > - Optimize for Sharpe ratio in live conditions
 - [x] Document backtesting findings #p2
 - [x] Analyze performance by market regime #p2
 - [x] Merge datasets into unified format #p2

@@ -22,9 +22,6 @@ from strategies.mean_reversion_bb.base_model import DirectionalModel
 from strategies.mean_reversion_bb.config import (
     TIMEFRAME,
     QUOTE_REFRESH_INTERVAL,
-    RISK_PER_TRADE,
-    MAX_POSITION_PCT,
-    STOP_ATR_MULTIPLIER,
     MAKER_FEE,
     TAKER_FEE,
 )
@@ -200,13 +197,16 @@ class DirectionalTrader:
         Uses fixed-fractional risk: risk_amount / distance = qty.
         Respects MAX_POSITION_PCT and exchange lot-size constraints.
         """
-        risk_amount = self.state.equity * RISK_PER_TRADE
+        risk_per_trade = getattr(self.model, 'risk_per_trade', 0.02)
+        max_position_pct = getattr(self.model, 'max_position_pct', 0.25)
+
+        risk_amount = self.state.equity * risk_per_trade
         distance = abs(entry_price - stop_price)
         if distance < 1e-8:
             return _MIN_ORDER_SIZE
 
         raw_qty = risk_amount / distance
-        max_qty = (self.state.equity * MAX_POSITION_PCT) / entry_price
+        max_qty = (self.state.equity * max_position_pct) / entry_price
         qty = min(raw_qty, max_qty)
 
         # Round to lot size
@@ -416,6 +416,23 @@ class DirectionalTrader:
                     sig_type = signal.get("signal", "none")
                     self.state.last_signal = sig_type
 
+                    # Status line
+                    rsi = signal.get("rsi", 0)
+                    adx = signal.get("adx", 0)
+                    bb_pos = signal.get("bb_position", 0)
+                    is_ranging = signal.get("is_ranging", False)
+                    is_squeeze = signal.get("is_squeeze", False)
+                    regime = "RANGE" if is_ranging else "TREND"
+                    sqz = " SQZ" if is_squeeze else ""
+                    print(
+                        f"{Colors.CYAN}"
+                        f"[{datetime.now().strftime('%H:%M:%S')}] "
+                        f"${self.state.current_price:,.2f} | "
+                        f"BB%={bb_pos:.2f} RSI={rsi:.1f} ADX={adx:.1f} "
+                        f"{regime}{sqz} | sig={sig_type}"
+                        f"{Colors.RESET}"
+                    )
+
                     if sig_type in ("long", "short", "squeeze_breakout"):
                         # Calculate ATR for stop placement
                         tr = pd.concat([
@@ -465,8 +482,10 @@ class DirectionalTrader:
         print(f"Timeframe:       {self.timeframe}")
         print(f"Initial Capital: ${self.initial_capital:,.2f}")
         print(f"Leverage:        {self.leverage}x")
-        print(f"Risk/Trade:      {RISK_PER_TRADE:.1%}")
-        print(f"Max Position:    {MAX_POSITION_PCT:.0%}")
+        risk_per_trade = getattr(self.model, 'risk_per_trade', 0.02)
+        max_position_pct = getattr(self.model, 'max_position_pct', 0.25)
+        print(f"Risk/Trade:      {risk_per_trade:.1%}")
+        print(f"Max Position:    {max_position_pct:.0%}")
         print(f"Fees:            maker={MAKER_FEE:.4%} taker={TAKER_FEE:.4%}")
         print(f"Poll Interval:   {self.poll_interval}s")
 

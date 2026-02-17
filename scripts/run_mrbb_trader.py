@@ -38,11 +38,20 @@ from strategies.mean_reversion_bb.config import (
     BB_STD_DEV,
     BB_INNER_STD_DEV,
     VWAP_PERIOD,
+    VWAP_CONFIRMATION_PCT,
     KC_PERIOD,
     KC_ATR_MULTIPLIER,
+    MIN_SQUEEZE_DURATION,
     RSI_PERIOD,
     RSI_OVERSOLD,
     RSI_OVERBOUGHT,
+    ADX_PERIOD,
+    ADX_THRESHOLD,
+    REVERSION_TARGET,
+    MAX_HOLDING_BARS,
+    RISK_PER_TRADE,
+    MAX_POSITION_PCT,
+    STOP_ATR_MULTIPLIER,
     TIMEFRAME,
     QUOTE_REFRESH_INTERVAL,
 )
@@ -190,6 +199,51 @@ def parse_args():
         help="RSI overbought threshold (short entry)",
     )
 
+    # --- ADX / Regime filter ---
+    adx = parser.add_argument_group("ADX regime filter")
+    adx.add_argument(
+        "--adx-period", type=int, default=ADX_PERIOD,
+        help="ADX calculation period",
+    )
+    adx.add_argument(
+        "--adx-threshold", type=float, default=ADX_THRESHOLD,
+        help="ADX threshold for ranging regime (below = ranging)",
+    )
+    adx.add_argument(
+        "--no-regime-filter", action="store_true",
+        help="Disable ADX regime filter",
+    )
+
+    # --- Signal parameters ---
+    sig = parser.add_argument_group("signal parameters")
+    sig.add_argument(
+        "--reversion-target", type=float, default=REVERSION_TARGET,
+        help="Mean reversion target (fraction of distance to center)",
+    )
+    sig.add_argument(
+        "--max-holding-bars", type=int, default=MAX_HOLDING_BARS,
+        help="Maximum bars to hold a position",
+    )
+    sig.add_argument(
+        "--vwap-confirmation-pct", type=float, default=VWAP_CONFIRMATION_PCT,
+        help="VWAP proximity threshold for confirmation",
+    )
+
+    # --- Risk parameters ---
+    risk = parser.add_argument_group("risk management")
+    risk.add_argument(
+        "--risk-per-trade", type=float, default=RISK_PER_TRADE,
+        help="Risk per trade as fraction of equity",
+    )
+    risk.add_argument(
+        "--max-position-pct", type=float, default=MAX_POSITION_PCT,
+        help="Max position as fraction of equity",
+    )
+    risk.add_argument(
+        "--stop-atr-mult", type=float, default=STOP_ATR_MULTIPLIER,
+        help="Stop loss ATR multiplier",
+    )
+
     return parser.parse_args()
 
 
@@ -232,9 +286,20 @@ def main():
         bb_std_dev=args.bb_std_dev,
         bb_inner_std_dev=args.bb_inner_std_dev,
         vwap_period=args.vwap_period,
+        vwap_confirmation_pct=args.vwap_confirmation_pct,
         kc_period=args.kc_period,
         kc_atr_multiplier=args.kc_atr_mult,
         rsi_period=args.rsi_period,
+        rsi_oversold=args.rsi_oversold,
+        rsi_overbought=args.rsi_overbought,
+        adx_period=args.adx_period,
+        adx_threshold=args.adx_threshold,
+        use_regime_filter=not args.no_regime_filter,
+        reversion_target=args.reversion_target,
+        max_holding_bars=args.max_holding_bars,
+        risk_per_trade=args.risk_per_trade,
+        max_position_pct=args.max_position_pct,
+        stop_atr_multiplier=args.stop_atr_mult,
     )
 
     # --- Build trader ---
