@@ -139,18 +139,18 @@ DISPLACEMENT_THRESHOLD = 0.001  # 0.1% move triggers widening
 DISPLACEMENT_LOOKBACK = 6       # ticks (6 × 5s = 30s at default interval)
 DISPLACEMENT_AGGRESSION = 2.0   # widening multiplier per threshold unit
 DISPLACEMENT_MAX_MULT = 3.0     # max spread multiplier
-DISPLACEMENT_MIN_MULT = 0.85    # min spread multiplier (calm market tightening)
+DISPLACEMENT_MIN_MULT = 1.0     # 1.0 = no tightening in calm markets (was 0.85)
 
 # Inventory limits (multiples of order_size)
 INVENTORY_SOFT_LIMIT = 2   # start reducing order size
-INVENTORY_HARD_LIMIT = 3   # stop accumulating, reduce-only
+INVENTORY_HARD_LIMIT = 2   # stop accumulating, reduce-only
 
 # Active inventory reduction
-INVENTORY_MAX_HOLD_SECONDS = 900  # 15 min: force-reduce stale inventory
-INVENTORY_MAX_UNREALIZED_LOSS = 0.002  # 0.2% of capital: flatten if exceeded
+INVENTORY_MAX_HOLD_SECONDS = 1200  # 20 min: force-reduce stale inventory
+INVENTORY_MAX_UNREALIZED_LOSS = 0.03  # 3% of capital: flatten if exceeded
 
 # Post-fill cooldown
-FILL_COOLDOWN_SECONDS = 3.0  # seconds to wait after a fill before re-quoting
+FILL_COOLDOWN_SECONDS = 10.0  # seconds to wait after a fill before re-quoting
 
 # =============================================================================
 # Phase 2: Advanced Risk Controls

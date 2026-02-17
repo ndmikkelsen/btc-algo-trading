@@ -10,6 +10,8 @@ kanban-plugin: board
 
 ## Low Priority - #p2
 
+- [ ] Epic: Troubleshoot A-S model profitability #p2
+  > The Avellaneda-Stoikov / GLFT market making model is consistently losing money in live trading on Bybit BTC/USDT perpetual futures. Multiple live sessions (Feb 16, 2026) showed: adverse inventory accumulation in trending markets, forced market-order reductions destroying profits, displacement guard tightening spreads when it should widen them, and fill imbalance (80%+ one-sided fills). Tuning attempts so far: gamma 0.01, min-spread $30, cooldown 10s, hard limit 2x, disabled displacement tightening, two-stage inventory reduction, inventory-age gamma scaling. None achieved consistent profitability. Root causes to investigate: (1) kappa calibration may be wrong for Bybit order book depth, (2) regime filter reacts too slowly — fills sneak through before trend detection, (3) model assumes mean-reverting markets but BTC trends, (4) spread calculations may need rethinking for futures with funding rates. See .rules/ and memory files for detailed session metrics.
 - [ ] Tune quote update threshold for low-volatility markets #p2
   > Branch: fix/position-reduce
   >
@@ -50,6 +52,12 @@ kanban-plugin: board
   > - Improve fill rate while maintaining profitability
   > - Reduce inventory risk exposure
   > - Optimize for Sharpe ratio in live conditions
+- [ ] Track per-entry timestamps for round-trip hold_time_seconds #p2
+  > Branch: test/paper-test
+  >
+  > Found in strategies/avellaneda_stoikov/live_trader.py
+  >
+  > The round-trip DB record currently writes hold_time_seconds=0.0 because we don't track when each entry fill occurred. Need to store entry timestamps so hold_time can be computed when the round-trip closes.
 
 ## Medium Priority - #p1
 

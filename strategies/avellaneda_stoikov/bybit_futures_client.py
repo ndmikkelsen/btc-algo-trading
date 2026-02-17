@@ -163,7 +163,7 @@ class BybitFuturesClient:
         if order_type == 'limit':
             order_params['postOnly'] = True
 
-        return self.exchange.create_order(
+        result = self.exchange.create_order(
             symbol=symbol,
             type=order_type,
             side=side,
@@ -171,6 +171,12 @@ class BybitFuturesClient:
             price=price,
             params=order_params
         )
+        # Normalize to match expected format (orderId, not id)
+        return {
+            'orderId': result.get('id'),
+            'status': result.get('status', 'open'),
+            'info': result.get('info', {}),
+        }
 
     def place_maker_order(
         self,
@@ -222,6 +228,29 @@ class BybitFuturesClient:
             List of open orders
         """
         return self.exchange.fetch_open_orders(symbol)
+
+    def get_order_history(self, symbol: str, limit: int = 10) -> List[Dict]:
+        """Get recent closed/filled orders for fill detection.
+
+        Args:
+            symbol: Trading symbol
+            limit: Max orders to return
+
+        Returns:
+            List of order dicts with orderId, orderStatus, side, qty, avgPrice
+        """
+        orders = self.exchange.fetch_closed_orders(symbol, limit=limit)
+        result = []
+        for o in orders:
+            result.append({
+                'orderId': o.get('id', ''),
+                'orderStatus': 'Filled' if o.get('status') == 'closed' else o.get('status'),
+                'side': o.get('side', '').capitalize(),
+                'qty': str(o.get('filled', o.get('amount', 0))),
+                'avgPrice': str(o.get('average', o.get('price', 0))),
+                'symbol': o.get('symbol', symbol),
+            })
+        return result
 
 
 class DryRunFuturesClient:
