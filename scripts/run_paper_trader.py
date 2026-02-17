@@ -300,6 +300,9 @@ def main():
         leverage=args.leverage if args.futures else 1,
     )
 
+    # Pass log path so DB instance records can reference it
+    trader._log_path = log_path
+
     # Handle graceful shutdown
     def signal_handler(sig, frame):
         print("\nReceived interrupt signal...")

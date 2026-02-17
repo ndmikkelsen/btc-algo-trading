@@ -477,3 +477,186 @@ The strategy implementation has foundational issues that would make any backtest
 **Recommendation**: Do not trade real money until at minimum C1-C5 are resolved and the strategy is re-validated with walk-forward testing. After fixes, expect the backtest to show dramatically worse results (possibly negative). If the strategy is still profitable after realistic fill modeling, it may have genuine edge. But the current results cannot be trusted.
 
 The good news: the code is well-structured, well-tested for its current logic, and the infrastructure (exchange client, risk manager, regime detection) provides a solid foundation. The issues are fixable. But they must be fixed before capital is at risk.
+
+---
+---
+
+# Live Paper Trading Audit — 2026-02-15
+
+**Date**: 2026-02-15
+**Scope**: Deep investigation into why the GLFT model fails to profit in live (dry-run) paper trading on Bybit Futures
+**Data**: 4 paper trading sessions totaling ~12+ hours, 46 limit fills, 22 round-trips
+**Team**: 4 specialized agents (researcher, model-auditor, log-analyst, fill-auditor)
+
+---
+
+## Executive Summary
+
+After extensive paper trading on Bybit Futures (BTC/USDT:USDT), the strategy consistently loses money. Net realized PnL across all sessions: **-$0.29** over 22 round-trips. The strategy captures ~$0.01/RT in spread but loses ~$0.045/RT to adverse selection, netting **-$0.035 per round-trip**. Six fundamental issues explain the unprofitability.
+
+---
+
+## 1. The Six Root Causes
+
+### RC1: Kappa (κ=10.0) is ~235× Too High
+**Severity**: CRITICAL — Single biggest parameter error
+
+The order book liquidity parameter κ controls the "adverse selection" term in the GLFT spread formula:
+
+```
+δ* = (1/κ)·ln(1+κ/γ) + √(e·σ²·γ/(2Aκ))
+```
+
+With κ=10.0, the `(1/κ)·ln(1+κ/γ)` term compresses to near-zero, producing spreads of ~5.4 bps (the minimum floor). Academic implementations and hftbacktest calibrations use κ≈0.03–0.05 for BTC, derived from fitting `λ(δ) = A·exp(-κδ)` to actual trade flow data.
+
+**Impact**: Spreads are ~5× too tight. The model quotes inside the natural bid-ask spread, guaranteeing adverse selection on every fill.
+
+**Evidence**: Every paper trading session showed 5.4 bps spreads (the minimum floor), meaning the model's spread calculation was always hitting MIN_SPREAD — the sophisticated GLFT optimization was completely bypassed.
+
+### RC2: No Maker Rebate — Fee Structure is Backwards
+**Severity**: CRITICAL — Structural viability issue
+
+The strategy was originally designed around MEXC spot (0% maker fee). On Bybit Futures VIP0, the actual maker fee is **0.02%** (2 bps). This means:
+
+- Every filled limit order **costs** 2 bps in fees
+- A round-trip costs **4 bps** in fees
+- With 5.4 bps gross spread, net capture is only **1.4 bps** before adverse selection
+
+The hftbacktest research that inspired this implementation achieved Sharpe ~10 using a **-0.005% maker rebate** (negative fee = exchange pays you). That rebate provided ~1 bps/side of profit; without it, the strategy fundamentally changes from "capture spread + collect rebate" to "capture spread – pay fees".
+
+**Impact**: The business model is inverted. Profitable A-S implementations on Bybit require either VIP3+ (maker rebate) or significantly wider spreads to absorb fee drag.
+
+### RC3: Dynamic Gamma is Broken (VOLATILITY_REFERENCE 50× Too High)
+**Severity**: HIGH — Phase 2 feature actively hurts performance
+
+Dynamic gamma scales risk aversion based on realized volatility:
+
+```python
+VOLATILITY_REFERENCE = 0.005  # 0.5% — reference for gamma scaling
+```
+
+At 1s quote intervals, per-tick volatility is ~0.0001 (0.01%), not 0.005 (0.5%). Since realized vol is always far below the reference, the gamma multiplier bottoms out at `GAMMA_MIN_MULT=0.5`, **permanently halving gamma**.
+
+**Perverse effect**: Lower gamma → tighter spreads → more fills → more adverse selection. During high volatility (when you want wider spreads for protection), gamma goes toward 1.0× (normal). During low volatility (safe to quote tight), gamma stays at 0.5× (too tight). This is exactly backwards.
+
+### RC4: "Widening Ratchet" — Phase 2 Features Only Widen, Never Tighten
+**Severity**: HIGH — Systematic spread inflation
+
+Three Phase 2 features (displacement guard, asymmetric spreads, fill imbalance) all apply multiplicative widening:
+
+| Feature | Multiplier | Direction |
+|---------|-----------|-----------|
+| Displacement guard | 1.0×–3.0× | Widen both sides |
+| Asymmetric spreads | 1.2× | Widen unfavorable side |
+| Fill imbalance | 1.3× | Widen imbalanced side |
+
+None of these ever **tighten** below baseline. Combined, they can widen spreads up to 3.0 × 1.2 × 1.3 = **4.7×** baseline. Log analysis shows displacement guard firing 15+ times per session, asymmetric spreads toggling every 1–2 minutes. The net effect is quotes that are frequently too wide to fill, explaining the low fill rate (4 RT/hour vs needed 18 RT/hour).
+
+### RC5: Paper Trading Fill Simulation is Fundamentally Flawed
+**Severity**: HIGH — Results are unreliable in both directions
+
+The `DryRunFuturesClient.check_fills()` has multiple compounding bugs:
+
+1. **Uses last-traded price, not bid/ask**: Compares limit orders against the last trade price, not the current best bid/ask. A limit buy at $68,741 triggers when last trade ≤ $68,741, even if the best ask is $68,745.
+2. **Fills at current price, not limit price**: When triggered, fills execute at `current_price` rather than the order's limit price. This creates phantom price improvement (or phantom slippage) that doesn't reflect reality.
+3. **No queue position modeling**: Assumes front-of-queue execution. Real Bybit has thousands of orders ahead.
+4. **1s polling misses touches**: A price that briefly touches the limit level between polls goes undetected.
+5. **FILL_AGGRESSIVENESS has zero effect**: The config parameter exists but is never used in the futures paper trading path.
+
+**Impact**: Biases partially cancel (too optimistic on some fills, too pessimistic on others), making PnL results unreliable as either optimistic or pessimistic estimates. The paper trading is essentially random noise around the true fill behavior.
+
+### RC6: No Alpha Signal — Pure Spread Capture Doesn't Work at These Fees
+**Severity**: MEDIUM — Strategic gap
+
+The current implementation is a pure market-making strategy with no predictive signal. It relies entirely on capturing the bid-ask spread. At 4 bps round-trip fees, the strategy needs either:
+
+- Significantly wider spreads (but then fills are too rare)
+- A directional signal to reduce adverse selection (e.g., order book imbalance, trade flow prediction)
+- Maker rebates to subsidize the spread capture
+
+Without alpha, the strategy is a negative-expectation coin flip at current fee levels.
+
+---
+
+## 2. What the Strategy Gets Right
+
+Despite the issues, several components are well-implemented:
+
+1. **GLFT math is correct**: The core reservation price and optimal spread formulas are properly implemented (minor √e deviation is negligible)
+2. **Inventory management works**: The soft/hard limit system, time-based decay, and loss threshold all function correctly
+3. **Safety controls are sound**: Tick filter, displacement guard logic (if not the parameters), cooldown timers
+4. **Infrastructure is solid**: Exchange client, SOCKS5 proxy, order management, PnL tracking (after fixes)
+5. **Logging and monitoring**: Comprehensive session summaries, fill tracking, error reporting
+
+---
+
+## 3. Log Analysis: Quantified Performance
+
+| Metric | Value |
+|--------|-------|
+| Total sessions | 4 (12+ hours) |
+| Limit fills | 46 |
+| Round-trips | 22 |
+| Net realized PnL | -$0.29 |
+| Gross spread capture | ~$0.01/RT |
+| Adverse selection cost | ~$0.045/RT |
+| Net per round-trip | -$0.035 |
+| Fill rate | ~4 RT/hour |
+| Break-even fill rate | ~18 RT/hour |
+| Spread (observed) | 5.4 bps (always at minimum) |
+| Inventory reductions | 2 (both at losses) |
+| Revenue split | 38% spread capture, 62% directional exposure |
+
+---
+
+## 4. Ranked Recommendations
+
+### Tier 1: Must Fix (Strategy is non-viable without these)
+
+| # | Fix | Effort | Impact |
+|---|-----|--------|--------|
+| 1 | **Calibrate κ from live order book** | Medium | Correct spreads from 5 bps → ~25-50 bps |
+| 2 | **Switch to MEXC spot (0% maker)** or target Bybit VIP3+ | Low | Eliminate 4 bps/RT fee drag |
+| 3 | **Fix VOLATILITY_REFERENCE** to match tick interval | Trivial | Fix dynamic gamma direction |
+| 4 | **Fix fill simulation** to use bid/ask + limit prices | Medium | Make paper trading results trustworthy |
+
+### Tier 2: Should Fix (Significant improvement expected)
+
+| # | Fix | Effort | Impact |
+|---|-----|--------|--------|
+| 5 | Add spread **tightening** to Phase 2 features | Low | Break the widening ratchet |
+| 6 | Add **order book imbalance** as alpha signal | Medium | Reduce adverse selection |
+| 7 | Implement **live κ calibration** from trade flow | High | Adaptive spread sizing |
+| 8 | Add **queue position modeling** to paper trading | Medium | Realistic fill expectations |
+
+### Tier 3: Nice to Have (Polish and optimization)
+
+| # | Fix | Effort | Impact |
+|---|-----|--------|--------|
+| 9 | Tune MOMENTUM_THRESHOLD for 1s intervals | Low | Better asymmetric behavior |
+| 10 | Add fill-rate tracking metric | Low | Better performance monitoring |
+| 11 | Implement partial fills in simulation | Medium | More realistic testing |
+| 12 | Walk-forward parameter validation | High | Confidence in parameter stability |
+
+---
+
+## 5. Recommended Next Steps
+
+1. **Quick wins** (can do now):
+   - Fix VOLATILITY_REFERENCE to ~0.0001 for 1s ticks
+   - Set κ=0.05 (literature value) as starting point
+   - Add spread tightening to displacement guard (allow < 1.0× multiplier)
+
+2. **Exchange decision** (strategic):
+   - If staying on Bybit: Need VIP3+ for maker rebate, or accept wider spreads
+   - If switching to MEXC: Re-enable spot mode, 0% maker fee makes strategy viable at tighter spreads
+
+3. **Live κ calibration** (medium-term):
+   - Collect trade-and-quote data for 24h
+   - Fit λ(δ) = A·exp(-κδ) to observed fill rates at various distances
+   - Use calibrated κ for spread calculation
+
+4. **Alpha integration** (longer-term):
+   - Add order book imbalance signal
+   - Use trade flow momentum for directional bias
+   - Consider microstructure features (trade size clustering, sweep detection)
