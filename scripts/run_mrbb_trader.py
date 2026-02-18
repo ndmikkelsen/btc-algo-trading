@@ -21,6 +21,7 @@ To get Bybit API keys:
 
 import argparse
 import os
+import re
 import sys
 import signal
 import time
@@ -60,13 +61,15 @@ from strategies.mean_reversion_bb.config import (
 class TeeStream:
     """Write to both a file and the original stream (stdout/stderr)."""
 
+    _ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
+
     def __init__(self, stream, log_file):
         self.stream = stream
         self.log_file = log_file
 
     def write(self, data):
         self.stream.write(data)
-        self.log_file.write(data)
+        self.log_file.write(self._ANSI_RE.sub('', data))
         self.log_file.flush()
 
     def flush(self):
@@ -88,14 +91,10 @@ def setup_logging(mode: str, symbol: str) -> str:
 
     Returns the log file path.
     """
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    log_dir = os.path.join(project_root, "logs")
-    os.makedirs(log_dir, exist_ok=True)
-
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     safe_symbol = symbol.replace("/", "-").replace(":", "-")
     log_filename = f"mrbb-{safe_symbol}-{mode}-{timestamp}.log"
-    log_path = os.path.join(log_dir, log_filename)
+    log_path = os.path.join("/tmp", log_filename)
 
     log_file = open(log_path, "a")
     sys.stdout = TeeStream(sys.__stdout__, log_file)

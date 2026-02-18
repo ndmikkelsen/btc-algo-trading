@@ -24,6 +24,11 @@ from strategies.mean_reversion_bb.config import (
     QUOTE_REFRESH_INTERVAL,
     MAKER_FEE,
     TAKER_FEE,
+    RSI_OVERSOLD,
+    RSI_OVERBOUGHT,
+    ADX_THRESHOLD,
+    VWAP_CONFIRMATION_PCT,
+    MAX_HOLDING_BARS,
 )
 from strategies.avellaneda_stoikov.bybit_futures_client import (
     BybitFuturesClient,
@@ -85,6 +90,12 @@ class TraderState:
     losses: int = 0
     last_signal: Optional[str] = None
     errors: List[str] = field(default_factory=list)
+    trade_history: list = field(default_factory=list)
+    signals_seen: dict = field(default_factory=lambda: {
+        "long": 0, "short": 0, "squeeze_breakout": 0, "none": 0,
+    })
+    equity_curve: list = field(default_factory=list)
+    start_time: Optional[datetime] = None
 
 
 class DirectionalTrader:
@@ -310,6 +321,21 @@ class DirectionalTrader:
                 pnl = (pos.entry_price - exit_price) * pos.size
             pnl -= fee  # Subtract exit fee
 
+            # Record trade history before updating state totals
+            entry_fee = pos.size * pos.entry_price * TAKER_FEE
+            self.state.trade_history.append({
+                "side": pos.side,
+                "entry_price": pos.entry_price,
+                "exit_price": exit_price,
+                "size": pos.size,
+                "pnl": pnl,
+                "fees": entry_fee + fee,
+                "entry_time": pos.entry_time,
+                "exit_time": datetime.now(),
+                "bars_held": pos.bars_held,
+                "exit_reason": reason,
+            })
+
             self.state.total_pnl += pnl
             self.state.equity += pnl
             self.state.trades_count += 1
@@ -317,6 +343,8 @@ class DirectionalTrader:
                 self.state.wins += 1
             else:
                 self.state.losses += 1
+
+            self.state.equity_curve.append({"equity": self.state.equity})
 
             color = Colors.GREEN if pnl >= 0 else Colors.RED
             emoji = "W" if pnl >= 0 else "L"
@@ -418,25 +446,11 @@ class DirectionalTrader:
                     )
                     sig_type = signal.get("signal", "none")
                     self.state.last_signal = sig_type
+                    if sig_type in self.state.signals_seen:
+                        self.state.signals_seen[sig_type] += 1
 
                     # Status line
-                    rsi = signal.get("rsi", 0)
-                    adx = signal.get("adx", 0)
-                    bb_pos = signal.get("bb_position", 0)
-                    vwap_dev = signal.get("vwap_deviation", 0)
-                    is_ranging = signal.get("is_ranging", False)
-                    is_squeeze = signal.get("is_squeeze", False)
-                    regime = "RANGE" if is_ranging else "TREND"
-                    sqz = " SQZ" if is_squeeze else ""
-                    print(
-                        f"{Colors.CYAN}"
-                        f"[{datetime.now().strftime('%H:%M:%S')}] "
-                        f"${self.state.current_price:,.2f} | "
-                        f"BB%={bb_pos:.2f} RSI={rsi:.1f} ADX={adx:.1f} "
-                        f"VWAP={vwap_dev:.3f} "
-                        f"{regime}{sqz} | sig={sig_type}"
-                        f"{Colors.RESET}"
-                    )
+                    print(self.format_status_line(signal, self.state.position))
 
                     if sig_type in ("long", "short", "squeeze_breakout"):
                         # Calculate ATR for stop placement
@@ -475,6 +489,7 @@ class DirectionalTrader:
             print("Trader already running")
             return
 
+        self.state.start_time = datetime.now()
         mode = "DRY-RUN" if self.dry_run else "LIVE"
         model_name = type(self.model).__name__
 
@@ -527,27 +542,188 @@ class DirectionalTrader:
         self._print_summary()
 
     def _print_summary(self) -> None:
-        """Print trading session summary."""
-        win_rate = (
-            self.state.wins / self.state.trades_count * 100
-            if self.state.trades_count > 0 else 0.0
-        )
+        """Print trading session summary with trade history and stats."""
+        C = Colors
+
+        # Runtime
+        if self.state.start_time:
+            elapsed = datetime.now() - self.state.start_time
+            total_secs = int(elapsed.total_seconds())
+            h, remainder = divmod(total_secs, 3600)
+            m, s = divmod(remainder, 60)
+            runtime_str = f"{h:02d}:{m:02d}:{s:02d}"
+        else:
+            runtime_str = "N/A"
 
         print()
-        print("=" * 60)
-        print("SESSION SUMMARY")
-        print("=" * 60)
+        print(f"{C.CYAN}{C.BOLD}{'=' * 60}{C.RESET}")
+        print(f"{C.CYAN}{C.BOLD}SESSION SUMMARY{C.RESET}")
+        print(f"{C.CYAN}{C.BOLD}{'=' * 60}{C.RESET}")
         print(f"Model:           {type(self.model).__name__}")
         print(f"Mode:            {'DRY-RUN' if self.dry_run else 'LIVE'}")
+        print(f"Runtime:         {runtime_str}")
         print(f"Final Price:     ${self.state.current_price:,.2f}")
         print(f"Final Equity:    ${self.state.equity:,.2f}")
-        print(f"Total P&L:       ${self.state.total_pnl:+,.2f}")
+
+        # Color the total P&L
+        pnl_color = C.GREEN if self.state.total_pnl >= 0 else C.RED
+        print(f"Total P&L:       {pnl_color}${self.state.total_pnl:+,.2f}{C.RESET}")
         print(f"Total Fees:      ${self.state.total_fees:,.4f}")
-        print(f"Trades:          {self.state.trades_count}")
-        print(f"Wins/Losses:     {self.state.wins}/{self.state.losses}")
-        print(f"Win Rate:        {win_rate:.1f}%")
         print(f"Errors:          {len(self.state.errors)}")
-        print("=" * 60)
+
+        # Signals seen
+        print(f"\n{C.CYAN}{C.BOLD}--- Signals Seen ---{C.RESET}")
+        for sig_type, count in self.state.signals_seen.items():
+            print(f"  {sig_type:20s} {count}")
+
+        # Trade history
+        print(f"\n{C.CYAN}{C.BOLD}--- Trade History ---{C.RESET}")
+        if not self.state.trade_history:
+            print("  No trades taken")
+        else:
+            for i, trade in enumerate(self.state.trade_history, 1):
+                pnl = trade["pnl"]
+                tc = C.GREEN if pnl >= 0 else C.RED
+                side_str = trade["side"].upper()
+                print(
+                    f"  {i}. {tc}{side_str:5s} "
+                    f"${trade['entry_price']:,.2f} -> "
+                    f"${trade['exit_price']:,.2f} | "
+                    f"P&L ${pnl:+,.2f} | "
+                    f"{trade['bars_held']} bars | "
+                    f"{trade['exit_reason']}{C.RESET}"
+                )
+
+            # Stats
+            pnls = [t["pnl"] for t in self.state.trade_history]
+            wins = sum(1 for p in pnls if p >= 0)
+            total = len(pnls)
+            win_rate = wins / total * 100
+
+            gross_profit = sum(p for p in pnls if p > 0)
+            gross_loss = abs(sum(p for p in pnls if p < 0))
+            profit_factor = (
+                gross_profit / gross_loss if gross_loss > 0 else float("inf")
+            )
+
+            best_pnl = max(pnls)
+            worst_pnl = min(pnls)
+            avg_pnl = sum(pnls) / total
+
+            # Max drawdown from equity curve
+            max_dd = 0.0
+            if self.state.equity_curve:
+                peak = self.state.equity_curve[0]["equity"]
+                for entry in self.state.equity_curve:
+                    eq = entry["equity"]
+                    if eq > peak:
+                        peak = eq
+                    dd = peak - eq
+                    if dd > max_dd:
+                        max_dd = dd
+
+            print(f"\n{C.CYAN}{C.BOLD}--- Stats ---{C.RESET}")
+            print(f"  Trades:          {total}")
+            print(f"  Wins/Losses:     {wins}/{total - wins}")
+            print(f"  Win Rate:        {win_rate:.1f}%")
+            pf_str = (
+                f"{profit_factor:.2f}"
+                if profit_factor != float("inf") else "inf"
+            )
+            print(f"  Profit Factor:   {pf_str}")
+            best_c = C.GREEN if best_pnl >= 0 else C.RED
+            worst_c = C.GREEN if worst_pnl >= 0 else C.RED
+            print(f"  Best Trade:      {best_c}${best_pnl:+,.2f}{C.RESET}")
+            print(f"  Worst Trade:     {worst_c}${worst_pnl:+,.2f}{C.RESET}")
+            print(f"  Avg P&L/Trade:   ${avg_pnl:+,.2f}")
+            print(f"  Max Drawdown:    ${max_dd:,.2f}")
+
+        print(f"{C.CYAN}{C.BOLD}{'=' * 60}{C.RESET}")
+
+    def format_status_line(
+        self, signal: dict, position: Optional[Position] = None,
+    ) -> str:
+        """Format a colored status line with condition-by-condition breakdown.
+
+        Shows each of the 4 entry conditions as PASS/FAIL with indicator
+        values, plus position info (P&L, bars held) when applicable.
+        """
+        parts = []
+        price = self.state.current_price
+        ts = datetime.now().strftime("%H:%M:%S")
+        parts.append(f"{Colors.CYAN}[{ts}] ${price:,.2f}{Colors.RESET}")
+
+        bb_pos = signal.get("bb_position", 0.5)
+        rsi = signal.get("rsi", 50.0)
+        vwap_dev = signal.get("vwap_deviation", 0.0)
+        adx = signal.get("adx", 0.0)
+        is_ranging = signal.get("is_ranging", False)
+        is_squeeze = signal.get("is_squeeze", False)
+        sig_type = signal.get("signal", "none")
+
+        pass_count = 0
+
+        # BB touch: near lower (<0.05) or upper (>0.95) band
+        bb_pass = bb_pos < 0.05 or bb_pos > 0.95
+        if bb_pass:
+            pass_count += 1
+        c = Colors.GREEN if bb_pass else Colors.RED
+        s = "PASS" if bb_pass else "FAIL"
+        parts.append(f"BB%={bb_pos:.2f} {c}{s}{Colors.RESET}")
+
+        # RSI confirmation
+        rsi_pass = rsi < RSI_OVERSOLD or rsi > RSI_OVERBOUGHT
+        if rsi_pass:
+            pass_count += 1
+        c = Colors.GREEN if rsi_pass else Colors.RED
+        s = "PASS" if rsi_pass else "FAIL"
+        parts.append(f"RSI={rsi:.1f} {c}{s}{Colors.RESET}")
+
+        # VWAP deviation
+        vwap_pass = vwap_dev < VWAP_CONFIRMATION_PCT
+        if vwap_pass:
+            pass_count += 1
+        c = Colors.GREEN if vwap_pass else Colors.RED
+        s = "PASS" if vwap_pass else "FAIL"
+        parts.append(f"VWAP={vwap_dev:.3f} {c}{s}{Colors.RESET}")
+
+        # ADX regime filter
+        adx_pass = is_ranging
+        if adx_pass:
+            pass_count += 1
+        c = Colors.GREEN if adx_pass else Colors.RED
+        s = "PASS" if adx_pass else "FAIL"
+        parts.append(f"ADX={adx:.1f} {c}{s}{Colors.RESET}")
+
+        # Squeeze indicator
+        if is_squeeze:
+            squeeze_dur = signal.get("squeeze_duration", 0)
+            parts.append(f"{Colors.YELLOW}SQZ({squeeze_dur}){Colors.RESET}")
+
+        # Signal result
+        if sig_type in ("long", "short"):
+            direction = sig_type.upper()
+            parts.append(
+                f"{Colors.GREEN}{Colors.BOLD}ENTRY SIGNAL: {direction}{Colors.RESET}"
+            )
+        else:
+            parts.append(f"SKIP ({pass_count}/4)")
+
+        # Position info
+        if position is not None:
+            if position.side == "long":
+                pnl = (price - position.entry_price) * position.size
+            else:
+                pnl = (position.entry_price - price) * position.size
+            pnl_color = Colors.GREEN if pnl >= 0 else Colors.RED
+            pnl_sign = "+" if pnl >= 0 else ""
+            parts.append(f"{pnl_color}P&L: {pnl_sign}{pnl:.2f}{Colors.RESET}")
+            parts.append(f"Bars: {position.bars_held}/{MAX_HOLDING_BARS}")
+            parts.append(
+                f"Stop: ${position.stop_price:,.2f} Target: ${position.target_price:,.2f}"
+            )
+
+        return " | ".join(parts) + Colors.RESET
 
     def get_status(self) -> Dict:
         """Get current trader status."""
