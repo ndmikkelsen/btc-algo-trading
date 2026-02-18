@@ -223,14 +223,17 @@ class DirectionalTrader:
             return
 
         order = orders[0]  # Take the primary order
-        side = order.get("side", "").lower()
+        raw_side = order.get("side", "").lower()
+        # Map model signals (long/short) to exchange sides (buy/sell)
+        side_map = {"long": "buy", "short": "sell", "buy": "buy", "sell": "sell"}
+        side = side_map.get(raw_side, "")
         if side not in ("buy", "sell"):
             return
 
         entry_price = order.get("entry_price", self.state.current_price)
-        stop_price = order.get("stop_price", 0.0)
-        target_price = order.get("target_price", 0.0)
-        size = order.get("size", 0.0)
+        stop_price = order.get("stop_loss", order.get("stop_price", 0.0))
+        target_price = order.get("target", order.get("target_price", 0.0))
+        size = order.get("position_size", order.get("size", 0.0))
 
         if size <= 0:
             size = self._calculate_position_size(entry_price, stop_price)
@@ -420,6 +423,7 @@ class DirectionalTrader:
                     rsi = signal.get("rsi", 0)
                     adx = signal.get("adx", 0)
                     bb_pos = signal.get("bb_position", 0)
+                    vwap_dev = signal.get("vwap_deviation", 0)
                     is_ranging = signal.get("is_ranging", False)
                     is_squeeze = signal.get("is_squeeze", False)
                     regime = "RANGE" if is_ranging else "TREND"
@@ -429,6 +433,7 @@ class DirectionalTrader:
                         f"[{datetime.now().strftime('%H:%M:%S')}] "
                         f"${self.state.current_price:,.2f} | "
                         f"BB%={bb_pos:.2f} RSI={rsi:.1f} ADX={adx:.1f} "
+                        f"VWAP={vwap_dev:.3f} "
                         f"{regime}{sqz} | sig={sig_type}"
                         f"{Colors.RESET}"
                     )
