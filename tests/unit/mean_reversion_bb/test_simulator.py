@@ -231,3 +231,127 @@ class TestATR:
         sim.close_history = [100.0]
         atr = sim._compute_atr()
         assert atr > 0
+
+
+# ===========================================================================
+# Short position cash accounting
+# ===========================================================================
+
+
+class TestShortCashAccounting:
+    """Verify correct cash flow direction for short positions."""
+
+    def _make_sim(self, equity=10_000.0):
+        model = MeanReversionBB()
+        sim = DirectionalSimulator(model, initial_equity=equity, slippage_pct=0.0, random_seed=1)
+        return model, sim
+
+    def test_short_entry_credits_cash(self):
+        """Opening a short sells the asset, so cash should increase."""
+        model, sim = self._make_sim()
+        order = {
+            "side": "short",
+            "position_size": 1.0,
+            "stop_loss": 105.0,
+            "target": 95.0,
+            "partial_target": 97.0,
+        }
+        sim._enter_position(order, fill_price=100.0)
+        # Cash should have increased by size * price (selling)
+        assert sim.cash == pytest.approx(10_000 + 1.0 * 100.0)
+
+    def test_short_exit_debits_cash(self):
+        """Closing a short buys back the asset, so cash should decrease."""
+        model, sim = self._make_sim()
+        # Set up short position manually (as if entry already happened)
+        sim.position_side = "short"
+        sim.position_size = 1.0
+        sim.entry_price = 100.0
+        sim.cash = 10_000 + 100.0  # after short entry
+        model.position_side = "short"
+        model.bars_held = 0
+
+        sim._exit_position(exit_price=95.0, reason="target")
+        # Buying back at 95: cash should decrease by size * 95
+        assert sim.cash == pytest.approx(10_000 + 100.0 - 1.0 * 95.0)
+        # Net P&L = +5
+        assert sim.cash == pytest.approx(10_005.0)
+
+    def test_short_profit_increases_equity(self):
+        """Short where entry > exit = profit."""
+        model, sim = self._make_sim()
+        order = {
+            "side": "short",
+            "position_size": 1.0,
+            "stop_loss": 110.0,
+            "target": 90.0,
+            "partial_target": 95.0,
+        }
+        sim._enter_position(order, fill_price=100.0)
+        # Entry: cash = 10000 + 100 = 10100
+        assert sim.cash == pytest.approx(10_100.0)
+
+        sim._exit_position(exit_price=90.0, reason="target")
+        # Exit: cash = 10100 - 90 = 10010, profit of 10
+        assert sim.cash == pytest.approx(10_010.0)
+        assert sim.trade_log[-1]["pnl"] == pytest.approx(10.0)
+
+    def test_short_loss_decreases_equity(self):
+        """Short where exit > entry = loss."""
+        model, sim = self._make_sim()
+        order = {
+            "side": "short",
+            "position_size": 1.0,
+            "stop_loss": 115.0,
+            "target": 90.0,
+            "partial_target": 95.0,
+        }
+        sim._enter_position(order, fill_price=100.0)
+        sim._exit_position(exit_price=110.0, reason="stop_loss")
+        # Loss of 10: equity should be 9990
+        assert sim.cash == pytest.approx(9_990.0)
+        assert sim.trade_log[-1]["pnl"] == pytest.approx(-10.0)
+
+    def test_long_accounting_unchanged(self):
+        """Regression: long trades still work correctly after short fix."""
+        model, sim = self._make_sim()
+        order = {
+            "side": "long",
+            "position_size": 1.0,
+            "stop_loss": 90.0,
+            "target": 110.0,
+            "partial_target": 105.0,
+        }
+        sim._enter_position(order, fill_price=100.0)
+        # Long entry: cash decreases
+        assert sim.cash == pytest.approx(10_000 - 100.0)
+
+        sim._exit_position(exit_price=105.0, reason="target")
+        # Long exit: cash increases, profit of 5
+        assert sim.cash == pytest.approx(10_005.0)
+        assert sim.trade_log[-1]["pnl"] == pytest.approx(5.0)
+
+    def test_short_mtm_correct(self):
+        """Mark-to-market should reflect correct unrealized P&L for shorts."""
+        model, sim = self._make_sim()
+        order = {
+            "side": "short",
+            "position_size": 1.0,
+            "stop_loss": 110.0,
+            "target": 90.0,
+            "partial_target": 95.0,
+        }
+        sim._enter_position(order, fill_price=100.0)
+        # cash = 10100, short 1 unit at 100
+
+        # Price drops to 95: unrealized profit of 5
+        mtm = sim._mark_to_market(95.0)
+        assert mtm == pytest.approx(10_005.0)
+
+        # Price rises to 105: unrealized loss of 5
+        mtm = sim._mark_to_market(105.0)
+        assert mtm == pytest.approx(9_995.0)
+
+        # Price unchanged: no P&L
+        mtm = sim._mark_to_market(100.0)
+        assert mtm == pytest.approx(10_000.0)

@@ -8,8 +8,12 @@ Usage:
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
+
+# Add project root to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pandas as pd
 
@@ -233,6 +237,7 @@ def save_results(results: dict, output_dir: Path) -> None:
 def main():
     parser = argparse.ArgumentParser(description="Run MRBB backtest")
     parser.add_argument("--data", required=True, help="Path to OHLCV CSV file")
+    parser.add_argument("--preset", default=None, help="Named preset to load (CLI args override preset values)")
     parser.add_argument("--equity", type=float, default=10_000.0, help="Initial equity")
     parser.add_argument("--bb-period", type=int, default=BB_PERIOD)
     parser.add_argument("--bb-std", type=float, default=BB_STD_DEV)
@@ -252,6 +257,30 @@ def main():
     parser.add_argument("--days", type=int, default=None, help="Limit to last N days")
 
     args = parser.parse_args()
+
+    # Load preset defaults (CLI args still take priority)
+    if args.preset:
+        from strategies.mean_reversion_bb.presets import PresetManager
+        pm = PresetManager()
+        preset = pm.load(args.preset)
+        _PRESET_MAP = {
+            "bb_period": "bb_period",
+            "bb_std_dev": "bb_std",
+            "bb_inner_std_dev": "bb_inner_std",
+            "vwap_period": "vwap_period",
+            "kc_period": "kc_period",
+            "kc_atr_multiplier": "kc_atr_mult",
+            "rsi_period": "rsi_period",
+            "adx_period": "adx_period",
+            "adx_threshold": "adx_threshold",
+        }
+        for preset_key, arg_dest in _PRESET_MAP.items():
+            if preset_key in preset and getattr(args, arg_dest) == parser.get_default(arg_dest):
+                setattr(args, arg_dest, preset[preset_key])
+        if preset.get("use_regime_filter") is False and not args.no_regime_filter:
+            args.no_regime_filter = True
+        if not args.quiet:
+            print(f"Loaded preset: {args.preset}")
 
     df = load_data(args.data)
     if args.days:

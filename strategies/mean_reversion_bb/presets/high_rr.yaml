@@ -1,0 +1,43 @@
+# High reward-to-risk MRBB preset — targets 2:1+ payoff ratio
+name: high_rr
+description: >
+  Designed to fix the 1:1 payoff ratio problem identified in backtests
+  (avg winner $0.81 vs avg loser $0.82). Tighter stop (1.0x ATR)
+  reduces risk per trade, full reversion target (1.0) maximizes
+  reward, and longer max hold (80 bars) gives winning trades room
+  to reach the center band. Moderate ADX filter (25) balances
+  signal quality with frequency. Expected payoff ratio: 2:1+.
+regime: ranging
+
+# Bollinger Band parameters
+bb_period: 20
+bb_std_dev: 2.5
+bb_inner_std_dev: 1.0
+
+# VWAP parameters
+vwap_period: 50
+vwap_confirmation_pct: 0.02
+
+# Keltner Channel / Squeeze parameters
+kc_period: 20
+kc_atr_multiplier: 1.5
+min_squeeze_duration: 6
+
+# RSI parameters
+rsi_period: 14
+rsi_oversold: 30
+rsi_overbought: 70
+
+# ADX / Regime filter
+adx_period: 14
+adx_threshold: 25.0
+use_regime_filter: true
+
+# Signal parameters
+reversion_target: 1.0
+max_holding_bars: 80
+
+# Risk parameters
+risk_per_trade: 0.02
+max_position_pct: 0.25
+stop_atr_multiplier: 1.0

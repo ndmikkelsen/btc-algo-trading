@@ -1,0 +1,43 @@
+# Ranging market MRBB preset — optimized for sideways/consolidation
+name: ranging
+description: >
+  Optimized for sideways and consolidating markets where mean reversion
+  thrives. Tighter bands (2.0σ) capture smaller oscillations, very
+  strict ADX filter (18) ensures only clear ranging conditions, shorter
+  max hold (30 bars) and closer reversion target (0.7) for quick
+  round-trips. Reduced inner band (0.75σ) and shorter squeeze duration
+  adapt to lower-volatility environments.
+regime: ranging
+
+# Bollinger Band parameters
+bb_period: 20
+bb_std_dev: 2.0
+bb_inner_std_dev: 0.75
+
+# VWAP parameters
+vwap_period: 50
+vwap_confirmation_pct: 0.02
+
+# Keltner Channel / Squeeze parameters
+kc_period: 20
+kc_atr_multiplier: 1.5
+min_squeeze_duration: 4
+
+# RSI parameters
+rsi_period: 14
+rsi_oversold: 30
+rsi_overbought: 70
+
+# ADX / Regime filter
+adx_period: 14
+adx_threshold: 18.0
+use_regime_filter: true
+
+# Signal parameters
+reversion_target: 0.7
+max_holding_bars: 30
+
+# Risk parameters
+risk_per_trade: 0.02
+max_position_pct: 0.25
+stop_atr_multiplier: 2.5

@@ -83,7 +83,7 @@ class TeeStream:
         return self.stream.isatty()
 
 
-def setup_logging(mode: str, symbol: str) -> str:
+def setup_logging(mode: str, symbol: str, instance_id: str = "default") -> str:
     """Set up automatic file logging alongside stdout.
 
     Creates a timestamped log file in the project's logs/ directory.
@@ -93,7 +93,7 @@ def setup_logging(mode: str, symbol: str) -> str:
     """
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     safe_symbol = symbol.replace("/", "-").replace(":", "-")
-    log_filename = f"mrbb-{safe_symbol}-{mode}-{timestamp}.log"
+    log_filename = f"mrbb-{instance_id}-{safe_symbol}-{mode}-{timestamp}.log"
     log_path = os.path.join("/tmp", log_filename)
 
     log_file = open(log_path, "a")
@@ -107,6 +107,18 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Run Mean Reversion Bollinger Band trader on Bybit futures.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+
+    # --- Preset ---
+    parser.add_argument(
+        "--preset", default=None,
+        help="Named preset to load (CLI args override preset values)",
+    )
+
+    # --- Instance ID ---
+    parser.add_argument(
+        "--instance-id", default="default", dest="instance_id",
+        help="Instance identifier for concurrent bot support",
     )
 
     # --- Execution mode ---
@@ -251,6 +263,62 @@ def main():
     load_dotenv()
     args = parse_args()
 
+    # Load preset defaults (CLI args still take priority)
+    if args.preset:
+        from strategies.mean_reversion_bb.presets import PresetManager
+        pm = PresetManager()
+        preset = pm.load(args.preset)
+        _PRESET_MAP = {
+            "bb_period": "bb_period",
+            "bb_std_dev": "bb_std_dev",
+            "bb_inner_std_dev": "bb_inner_std_dev",
+            "vwap_period": "vwap_period",
+            "vwap_confirmation_pct": "vwap_confirmation_pct",
+            "kc_period": "kc_period",
+            "kc_atr_multiplier": "kc_atr_mult",
+            "rsi_period": "rsi_period",
+            "rsi_oversold": "rsi_oversold",
+            "rsi_overbought": "rsi_overbought",
+            "adx_period": "adx_period",
+            "adx_threshold": "adx_threshold",
+            "reversion_target": "reversion_target",
+            "max_holding_bars": "max_holding_bars",
+            "risk_per_trade": "risk_per_trade",
+            "max_position_pct": "max_position_pct",
+            "stop_atr_multiplier": "stop_atr_mult",
+        }
+        # We need access to the parser to check defaults — use a simple
+        # sentinel check: apply preset value when arg still equals its
+        # config-module default (i.e. user didn't override on CLI).
+        from strategies.mean_reversion_bb import config as _cfg
+        _CFG_DEFAULTS = {
+            "bb_period": _cfg.BB_PERIOD,
+            "bb_std_dev": _cfg.BB_STD_DEV,
+            "bb_inner_std_dev": _cfg.BB_INNER_STD_DEV,
+            "vwap_period": _cfg.VWAP_PERIOD,
+            "vwap_confirmation_pct": _cfg.VWAP_CONFIRMATION_PCT,
+            "kc_period": _cfg.KC_PERIOD,
+            "kc_atr_multiplier": _cfg.KC_ATR_MULTIPLIER,
+            "rsi_period": _cfg.RSI_PERIOD,
+            "rsi_oversold": _cfg.RSI_OVERSOLD,
+            "rsi_overbought": _cfg.RSI_OVERBOUGHT,
+            "adx_period": _cfg.ADX_PERIOD,
+            "adx_threshold": _cfg.ADX_THRESHOLD,
+            "reversion_target": _cfg.REVERSION_TARGET,
+            "max_holding_bars": _cfg.MAX_HOLDING_BARS,
+            "risk_per_trade": _cfg.RISK_PER_TRADE,
+            "max_position_pct": _cfg.MAX_POSITION_PCT,
+            "stop_atr_multiplier": _cfg.STOP_ATR_MULTIPLIER,
+        }
+        for preset_key, arg_dest in _PRESET_MAP.items():
+            if preset_key in preset:
+                cfg_default = _CFG_DEFAULTS.get(preset_key)
+                if cfg_default is not None and getattr(args, arg_dest) == cfg_default:
+                    setattr(args, arg_dest, preset[preset_key])
+        if preset.get("use_regime_filter") is False and not args.no_regime_filter:
+            args.no_regime_filter = True
+        print(f"Loaded preset: {args.preset}")
+
     dry_run = not args.live
 
     # --- API credentials ---
@@ -276,7 +344,7 @@ def main():
 
     # --- Logging ---
     mode = "live" if not dry_run else "dry-run"
-    log_path = setup_logging(mode, args.symbol)
+    log_path = setup_logging(mode, args.symbol, instance_id=args.instance_id)
     print(f"Logging to: {log_path}")
 
     # --- Build model ---
@@ -313,6 +381,7 @@ def main():
         timeframe=args.timeframe,
         poll_interval=args.interval,
         candle_limit=args.candles,
+        instance_id=args.instance_id,
     )
 
     # --- Signal handler for graceful shutdown ---

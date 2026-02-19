@@ -33,14 +33,14 @@ class TestLogPath:
             os.unlink(log_path)
 
     def test_log_filename_format(self, monkeypatch):
-        """Filename should match /tmp/mrbb-{symbol}-{mode}-{timestamp}.log."""
+        """Filename should match /tmp/mrbb-{instance_id}-{symbol}-{mode}-{timestamp}.log."""
         monkeypatch.setattr("sys.stdout", io.StringIO())
         monkeypatch.setattr("sys.stderr", io.StringIO())
 
         log_path = setup_logging(mode="paper", symbol="BTC/USDT:USDT")
         filename = os.path.basename(log_path)
 
-        pattern = r"^mrbb-BTC-USDT-USDT-paper-\d{8}-\d{6}\.log$"
+        pattern = r"^mrbb-default-BTC-USDT-USDT-paper-\d{8}-\d{6}\.log$"
         assert re.match(pattern, filename), f"Filename {filename!r} doesn't match expected pattern"
         assert log_path.startswith("/tmp/")
 

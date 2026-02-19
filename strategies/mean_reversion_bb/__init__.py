@@ -12,6 +12,7 @@ from strategies.mean_reversion_bb.directional_trader import (
 )
 from strategies.mean_reversion_bb.simulator import DirectionalSimulator
 from strategies.mean_reversion_bb.cpcv import run_cpcv, CPCVResult
+from strategies.mean_reversion_bb.presets import PresetManager
 from strategies.mean_reversion_bb.config import *
 
 __all__ = [
@@ -23,4 +24,5 @@ __all__ = [
     "DirectionalSimulator",
     "run_cpcv",
     "CPCVResult",
+    "PresetManager",
 ]

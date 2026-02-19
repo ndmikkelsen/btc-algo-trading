@@ -122,6 +122,7 @@ class DirectionalTrader:
         timeframe: str = TIMEFRAME,
         poll_interval: float = QUOTE_REFRESH_INTERVAL,
         candle_limit: int = 100,
+        instance_id: str = "default",
     ):
         self.model = model
         self.symbol = symbol
@@ -131,6 +132,7 @@ class DirectionalTrader:
         self.poll_interval = poll_interval
         self.candle_limit = candle_limit
         self.dry_run = dry_run
+        self.instance_id = instance_id
 
         # Exchange client
         proxy = os.getenv("SOCKS5_PROXY")
@@ -494,8 +496,9 @@ class DirectionalTrader:
         model_name = type(self.model).__name__
 
         print("=" * 60)
-        print("DIRECTIONAL TRADER")
+        print(f"DIRECTIONAL TRADER [{self.instance_id}]")
         print("=" * 60)
+        print(f"Instance:        {self.instance_id}")
         print(f"Model:           {model_name}")
         print(f"Mode:            {mode}")
         print(f"Symbol:          {self.symbol}")
@@ -651,7 +654,7 @@ class DirectionalTrader:
         parts = []
         price = self.state.current_price
         ts = datetime.now().strftime("%H:%M:%S")
-        parts.append(f"{Colors.CYAN}[{ts}] ${price:,.2f}{Colors.RESET}")
+        parts.append(f"{Colors.CYAN}[{self.instance_id}] [{ts}] ${price:,.2f}{Colors.RESET}")
 
         bb_pos = signal.get("bb_position", 0.5)
         rsi = signal.get("rsi", 50.0)

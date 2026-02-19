@@ -1,0 +1,42 @@
+# Conservative MRBB preset — wider bands, stricter filters, reduced risk
+name: conservative
+description: >
+  Conservative settings targeting higher-quality setups with reduced risk.
+  Wider bands (3.0σ) require more extreme price deviations for entry,
+  stricter ADX filter (28) avoids trending markets, and halved risk
+  per trade limits drawdowns. Closer reversion target (0.8) captures
+  more frequent smaller wins.
+regime: ranging
+
+# Bollinger Band parameters
+bb_period: 20
+bb_std_dev: 3.0
+bb_inner_std_dev: 1.0
+
+# VWAP parameters
+vwap_period: 50
+vwap_confirmation_pct: 0.02
+
+# Keltner Channel / Squeeze parameters
+kc_period: 20
+kc_atr_multiplier: 1.5
+min_squeeze_duration: 6
+
+# RSI parameters
+rsi_period: 14
+rsi_oversold: 30
+rsi_overbought: 70
+
+# ADX / Regime filter
+adx_period: 14
+adx_threshold: 28.0
+use_regime_filter: true
+
+# Signal parameters
+reversion_target: 0.8
+max_holding_bars: 50
+
+# Risk parameters
+risk_per_trade: 0.01
+max_position_pct: 0.15
+stop_atr_multiplier: 2.5

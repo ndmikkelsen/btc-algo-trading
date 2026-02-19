@@ -206,8 +206,11 @@ class DirectionalSimulator:
         self.model.entry_price = actual_price
         self.model.bars_held = 0
 
-        # Deduct from cash (notional)
-        self.cash -= self.position_size * actual_price
+        # Adjust cash for position entry
+        if self.position_side == "long":
+            self.cash -= self.position_size * actual_price
+        else:
+            self.cash += self.position_size * actual_price
 
     def _check_position_exits(self, high: float, low: float) -> Optional[str]:
         """Check if stop or target is hit within the candle's range."""
@@ -244,7 +247,10 @@ class DirectionalSimulator:
     def _partial_exit(self, exit_price: float) -> None:
         """Exit half the position at the partial target."""
         half = self.position_size / 2
-        self.cash += half * exit_price
+        if self.position_side == "long":
+            self.cash += half * exit_price
+        else:
+            self.cash -= half * exit_price
         self.position_size -= half
         self.partial_exited = True
 
@@ -267,7 +273,10 @@ class DirectionalSimulator:
             "reason": reason,
         })
 
-        self.cash += self.position_size * actual_exit
+        if self.position_side == "long":
+            self.cash += self.position_size * actual_exit
+        else:
+            self.cash -= self.position_size * actual_exit
         self.position_side = None
         self.position_size = 0.0
         self.entry_price = 0.0
@@ -288,7 +297,10 @@ class DirectionalSimulator:
         """Return current equity including unrealized PnL."""
         if self.position_side is None:
             return self.cash
-        return self.cash + self.position_size * current_price
+        if self.position_side == "long":
+            return self.cash + self.position_size * current_price
+        else:
+            return self.cash - self.position_size * current_price
 
     # ------------------------------------------------------------------
     # Helpers
@@ -466,19 +478,19 @@ class DirectionalSimulator:
                         exit_p = stop_loss + slippage
                         pnl = pos_size * (entry_price - exit_p)
                         trade_log.append({"side": "short", "entry_price": entry_price, "exit_price": exit_p, "size": pos_size, "pnl": pnl, "reason": "stop_loss"})
-                        cash += pos_size * exit_p
+                        cash -= pos_size * exit_p
                         pos_side = None; exit_done = True
                     elif lo <= target:
                         slippage = self.rng.uniform(0, self.slippage_pct) * target
                         exit_p = target + slippage
                         pnl = pos_size * (entry_price - exit_p)
                         trade_log.append({"side": "short", "entry_price": entry_price, "exit_price": exit_p, "size": pos_size, "pnl": pnl, "reason": "target"})
-                        cash += pos_size * exit_p
+                        cash -= pos_size * exit_p
                         pos_side = None; exit_done = True
                     elif not partial_exited and lo <= partial_target:
                         half = pos_size / 2
                         pnl_half = half * (entry_price - partial_target)
-                        cash += half * partial_target
+                        cash -= half * partial_target
                         pos_size -= half
                         partial_exited = True
 
@@ -494,7 +506,10 @@ class DirectionalSimulator:
                             exit_p = c + slippage
                             pnl = pos_size * (entry_price - exit_p)
                         trade_log.append({"side": pos_side, "entry_price": entry_price, "exit_price": exit_p, "size": pos_size, "pnl": pnl, "reason": "max holding period exceeded"})
-                        cash += pos_size * exit_p
+                        if pos_side == "long":
+                            cash += pos_size * exit_p
+                        else:
+                            cash -= pos_size * exit_p
                         pos_side = None
 
                     # Band walking: 3+ candles at outer band
@@ -512,7 +527,10 @@ class DirectionalSimulator:
                                 exit_p = c + slippage
                                 pnl = pos_size * (entry_price - exit_p)
                             trade_log.append({"side": pos_side, "entry_price": entry_price, "exit_price": exit_p, "size": pos_size, "pnl": pnl, "reason": "band walking detected"})
-                            cash += pos_size * exit_p
+                            if pos_side == "long":
+                                cash += pos_size * exit_p
+                            else:
+                                cash -= pos_size * exit_p
                             pos_side = None
 
             # 2. Signal generation if flat
@@ -562,11 +580,16 @@ class DirectionalSimulator:
                             partial_target = ptgt
                             partial_exited = False
                             bars_held = 0
-                            cash -= p_size * entry_p
+                            if signal == "long":
+                                cash -= p_size * entry_p
+                            else:
+                                cash += p_size * entry_p
 
             # 3. Equity
-            if pos_side is not None:
+            if pos_side == "long":
                 eq = cash + pos_size * c
+            elif pos_side == "short":
+                eq = cash - pos_size * c
             else:
                 eq = cash
             equity_curve.append({"timestamp": timestamps[i], "equity": eq})
@@ -582,7 +605,10 @@ class DirectionalSimulator:
                 exit_p = c + slippage
                 pnl = pos_size * (entry_price - exit_p)
             trade_log.append({"side": pos_side, "entry_price": entry_price, "exit_price": exit_p, "size": pos_size, "pnl": pnl, "reason": "end_of_backtest"})
-            cash += pos_size * exit_p
+            if pos_side == "long":
+                cash += pos_size * exit_p
+            else:
+                cash -= pos_size * exit_p
 
         final_equity = equity_curve[-1]["equity"] if equity_curve else self.initial_equity
 
