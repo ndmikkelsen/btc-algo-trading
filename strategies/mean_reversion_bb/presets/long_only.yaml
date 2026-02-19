@@ -11,7 +11,7 @@ description: >
   signals the simulator/trader to skip short signals.
 regime: trending_up
 
-# Side filter (metadata — not a model constructor param)
+# Side filter (now a model constructor param)
 side_filter: long_only
 
 # Bollinger Band parameters
@@ -46,3 +46,7 @@ max_holding_bars: 50
 risk_per_trade: 0.02
 max_position_pct: 0.25
 stop_atr_multiplier: 2.5
+
+# Configurable toggles
+use_squeeze_filter: true
+use_band_walking_exit: true

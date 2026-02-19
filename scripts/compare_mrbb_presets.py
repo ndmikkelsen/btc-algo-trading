@@ -54,6 +54,9 @@ MODEL_PARAMS = [
     "risk_per_trade",
     "max_position_pct",
     "stop_atr_multiplier",
+    "side_filter",
+    "use_squeeze_filter",
+    "use_band_walking_exit",
 ]
 
 

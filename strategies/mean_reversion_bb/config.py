@@ -91,6 +91,19 @@ MAX_POSITION_PCT = 0.25
 STOP_ATR_MULTIPLIER = 2.5
 
 # =============================================================================
+# Configurable Toggles
+# =============================================================================
+
+# Side filter: "both", "long_only", "short_only"
+SIDE_FILTER = "both"
+
+# Enable/disable squeeze filter (when False, entries allowed during squeeze)
+USE_SQUEEZE_FILTER = True
+
+# Enable/disable band walking exit (when False, band walking never triggers exit)
+USE_BAND_WALKING_EXIT = True
+
+# =============================================================================
 # Execution Parameters
 # =============================================================================
 

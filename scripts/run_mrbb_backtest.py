@@ -104,6 +104,7 @@ def run_backtest(
     slippage_pct: float = 0.0005,
     random_seed: int = 42,
     verbose: bool = True,
+    **extra_model_kwargs,
 ) -> dict:
     """Run the MRBB backtest and return results."""
     model = MeanReversionBB(
@@ -117,6 +118,7 @@ def run_backtest(
         adx_period=adx_period,
         adx_threshold=adx_threshold,
         use_regime_filter=use_regime_filter,
+        **extra_model_kwargs,
     )
 
     sim = DirectionalSimulator(
@@ -279,8 +281,18 @@ def main():
                 setattr(args, arg_dest, preset[preset_key])
         if preset.get("use_regime_filter") is False and not args.no_regime_filter:
             args.no_regime_filter = True
+        # Collect extra model params from preset (new toggles, thresholds)
+        _EXTRA_MODEL_KEYS = [
+            "rsi_oversold", "rsi_overbought", "vwap_confirmation_pct",
+            "stop_atr_multiplier", "reversion_target", "max_holding_bars",
+            "risk_per_trade", "max_position_pct", "side_filter",
+            "use_squeeze_filter", "use_band_walking_exit",
+        ]
+        extra_model_kwargs = {k: preset[k] for k in _EXTRA_MODEL_KEYS if k in preset}
         if not args.quiet:
             print(f"Loaded preset: {args.preset}")
+    else:
+        extra_model_kwargs = {}
 
     df = load_data(args.data)
     if args.days:
@@ -303,6 +315,7 @@ def main():
         slippage_pct=args.slippage,
         random_seed=args.seed,
         verbose=not args.quiet,
+        **extra_model_kwargs,
     )
 
     output_dir = Path(args.output) if args.output else OUTPUT_DIR

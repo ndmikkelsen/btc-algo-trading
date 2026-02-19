@@ -1,0 +1,48 @@
+# Optimized Conservative MRBB preset — research-backed with reduced risk
+name: optimized_conservative
+description: >
+  Conservative variant of the optimized preset. Stricter ADX filter (18)
+  ensures only clear ranging markets, halved risk per trade (1%), and
+  shorter time-based exit (12 hours). Same long-only, no-stop, simplified
+  filter approach as the optimized preset.
+regime: ranging
+
+# Side filter — long-only for BTC structural uptrend
+side_filter: long_only
+
+# Bollinger Band parameters
+bb_period: 20
+bb_std_dev: 2.5
+bb_inner_std_dev: 1.0
+
+# VWAP parameters — confirmation effectively disabled
+vwap_period: 50
+vwap_confirmation_pct: 1.0
+
+# Keltner Channel / Squeeze parameters
+kc_period: 20
+kc_atr_multiplier: 1.5
+min_squeeze_duration: 6
+
+# RSI parameters — strongest edge, keep tight
+rsi_period: 14
+rsi_oversold: 30
+rsi_overbought: 70
+
+# ADX / Regime filter — stricter for conservative approach
+adx_period: 14
+adx_threshold: 18.0
+use_regime_filter: true
+
+# Signal parameters — time-based exit (12h at 5m candles)
+reversion_target: 0.9
+max_holding_bars: 144
+
+# Risk parameters — no stop, half risk
+risk_per_trade: 0.01
+max_position_pct: 0.15
+stop_atr_multiplier: 0
+
+# Configurable toggles — simplified
+use_squeeze_filter: false
+use_band_walking_exit: false

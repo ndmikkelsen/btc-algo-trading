@@ -215,8 +215,8 @@ class DirectionalSimulator:
     def _check_position_exits(self, high: float, low: float) -> Optional[str]:
         """Check if stop or target is hit within the candle's range."""
         if self.position_side == "long":
-            # Stop hit
-            if low <= self.stop_loss:
+            # Stop hit (skip if stop is disabled)
+            if self.stop_loss != 0 and low <= self.stop_loss:
                 self._exit_position(self.stop_loss, "stop_loss")
                 return "stop_loss"
             # Target hit
@@ -229,8 +229,8 @@ class DirectionalSimulator:
                 return "partial_exit"
 
         elif self.position_side == "short":
-            # Stop hit
-            if high >= self.stop_loss:
+            # Stop hit (skip if stop is disabled)
+            if self.stop_loss != 0 and high >= self.stop_loss:
                 self._exit_position(self.stop_loss, "stop_loss")
                 return "stop_loss"
             # Target hit
@@ -451,7 +451,7 @@ class DirectionalSimulator:
             if pos_side is not None:
                 exit_done = False
                 if pos_side == "long":
-                    if lo <= stop_loss:
+                    if stop_loss != 0 and lo <= stop_loss:
                         pnl = pos_size * (stop_loss - entry_price)
                         slippage = self.rng.uniform(0, self.slippage_pct) * stop_loss
                         exit_p = stop_loss - slippage
@@ -473,7 +473,7 @@ class DirectionalSimulator:
                         pos_size -= half
                         partial_exited = True
                 elif pos_side == "short":
-                    if h >= stop_loss:
+                    if stop_loss != 0 and h >= stop_loss:
                         slippage = self.rng.uniform(0, self.slippage_pct) * stop_loss
                         exit_p = stop_loss + slippage
                         pnl = pos_size * (entry_price - exit_p)
@@ -513,7 +513,7 @@ class DirectionalSimulator:
                         pos_side = None
 
                     # Band walking: 3+ candles at outer band
-                    elif i >= 2 and pos_side is not None:
+                    elif i >= 2 and pos_side is not None and self.model.use_band_walking_exit:
                         if pos_side == "long":
                             walking = all(closes[i-j] <= lo_arr[i-j] for j in range(3) if not np.isnan(lo_arr[i-j]))
                         else:
@@ -546,44 +546,63 @@ class DirectionalSimulator:
                 atr_v = atr_arr[i] if not np.isnan(atr_arr[i]) else 1.0
 
                 signal = None
+                squeeze_blocks = sq and self.model.use_squeeze_filter
                 if (not np.isnan(uo_v) and not np.isnan(lo_v) and not np.isnan(mid_v)):
                     if (c <= lo_v and rsi_v < RSI_OVERSOLD and vd < VWAP_CONFIRMATION_PCT
-                            and not sq and regime_ok):
+                            and not squeeze_blocks and regime_ok):
                         signal = "long"
                     elif (c >= uo_v and rsi_v > RSI_OVERBOUGHT and vd < VWAP_CONFIRMATION_PCT
-                            and not sq and regime_ok):
+                            and not squeeze_blocks and regime_ok):
                         signal = "short"
+
+                # Side filter
+                if self.model.side_filter == "long_only" and signal == "short":
+                    signal = None
+                elif self.model.side_filter == "short_only" and signal == "long":
+                    signal = None
 
                 if signal and atr_v > 0:
                     if signal == "long":
-                        stop_loss = lo_v - STOP_ATR_MULTIPLIER * atr_v
+                        if STOP_ATR_MULTIPLIER == 0:
+                            stop_loss = 0.0
+                        else:
+                            stop_loss = lo_v - STOP_ATR_MULTIPLIER * atr_v
                         tgt = c + REVERSION_TARGET * (mid_v - c)
                         ptgt = li_arr[i] if not np.isnan(li_arr[i]) else (c + mid_v) / 2
                     else:
-                        stop_loss = uo_v + STOP_ATR_MULTIPLIER * atr_v
+                        if STOP_ATR_MULTIPLIER == 0:
+                            stop_loss = 0.0
+                        else:
+                            stop_loss = uo_v + STOP_ATR_MULTIPLIER * atr_v
                         tgt = c - REVERSION_TARGET * (c - mid_v)
                         ptgt = ui_arr[i] if not np.isnan(ui_arr[i]) else (c + mid_v) / 2
 
-                    stop_dist = abs(c - stop_loss)
-                    if stop_dist > 0:
-                        equity_now = cash  # simplified for flat position
-                        risk_size = RISK_PER_TRADE * equity_now / stop_dist
-                        max_size = MAX_POSITION_PCT * equity_now / c
-                        p_size = min(risk_size, max_size)
-                        if p_size > 0:
-                            slippage = self.rng.uniform(0, self.slippage_pct) * c
-                            entry_p = c + slippage if signal == "long" else c - slippage
-                            pos_side = signal
-                            pos_size = p_size
-                            entry_price = entry_p
-                            target = tgt
-                            partial_target = ptgt
-                            partial_exited = False
-                            bars_held = 0
-                            if signal == "long":
-                                cash -= p_size * entry_p
-                            else:
-                                cash += p_size * entry_p
+                    equity_now = cash  # simplified for flat position
+                    if stop_loss == 0.0:
+                        p_size = MAX_POSITION_PCT * equity_now / c
+                    else:
+                        stop_dist = abs(c - stop_loss)
+                        if stop_dist > 0:
+                            risk_size = RISK_PER_TRADE * equity_now / stop_dist
+                            max_size = MAX_POSITION_PCT * equity_now / c
+                            p_size = min(risk_size, max_size)
+                        else:
+                            p_size = 0.0
+
+                    if p_size > 0:
+                        slippage = self.rng.uniform(0, self.slippage_pct) * c
+                        entry_p = c + slippage if signal == "long" else c - slippage
+                        pos_side = signal
+                        pos_size = p_size
+                        entry_price = entry_p
+                        target = tgt
+                        partial_target = ptgt
+                        partial_exited = False
+                        bars_held = 0
+                        if signal == "long":
+                            cash -= p_size * entry_p
+                        else:
+                            cash += p_size * entry_p
 
             # 3. Equity
             if pos_side == "long":

@@ -41,3 +41,8 @@ max_holding_bars: 30
 risk_per_trade: 0.02
 max_position_pct: 0.25
 stop_atr_multiplier: 2.5
+
+# Configurable toggles
+side_filter: both
+use_squeeze_filter: true
+use_band_walking_exit: true

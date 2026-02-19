@@ -76,7 +76,7 @@ class ParamRegistry:
 
         # VWAP parameters
         self._register(ParamSpec("vwap_period", 50, 20, 100, 10, "int", description="VWAP rolling period"))
-        self._register(ParamSpec("vwap_confirmation_pct", 0.02, 0.01, 0.05, 0.005, "float", description="VWAP proximity threshold"))
+        self._register(ParamSpec("vwap_confirmation_pct", 0.02, 0.01, 1.0, 0.005, "float", description="VWAP proximity threshold (1.0 = effectively disabled)"))
 
         # Keltner Channel / Squeeze parameters
         self._register(ParamSpec("kc_period", 20, 10, 40, 5, "int", description="Keltner Channel period"))
@@ -92,12 +92,17 @@ class ParamRegistry:
         self._register(ParamSpec("rsi_oversold", 30, 20, 40, 5, "int", description="RSI oversold threshold"))
         self._register(ParamSpec("rsi_overbought", 70, 60, 80, 5, "int", description="RSI overbought threshold"))
         self._register(ParamSpec("reversion_target", 0.9, 0.5, 1.0, 0.1, "float", description="Mean reversion target (fraction of distance)"))
-        self._register(ParamSpec("max_holding_bars", 50, 20, 100, 10, "int", description="Max bars to hold position"))
+        self._register(ParamSpec("max_holding_bars", 50, 20, 300, 10, "int", description="Max bars to hold position (288 = 24h at 5m)"))
 
         # Risk parameters
         self._register(ParamSpec("risk_per_trade", 0.02, 0.01, 0.05, 0.005, "float", description="Risk per trade as fraction of equity"))
         self._register(ParamSpec("max_position_pct", 0.25, 0.10, 0.50, 0.05, "float", description="Max position as fraction of equity"))
-        self._register(ParamSpec("stop_atr_multiplier", 2.5, 1.0, 3.0, 0.25, "float", description="Stop loss ATR multiplier"))
+        self._register(ParamSpec("stop_atr_multiplier", 2.5, 0.0, 3.0, 0.25, "float", description="Stop loss ATR multiplier (0 = no stop)"))
+
+        # Configurable toggles
+        self._register(ParamSpec("side_filter", "both", param_type="choice", choices=["both", "long_only", "short_only"], description="Side filter: both, long_only, or short_only"))
+        self._register(ParamSpec("use_squeeze_filter", True, param_type="choice", choices=[True, False], description="Enable/disable squeeze filter"))
+        self._register(ParamSpec("use_band_walking_exit", True, param_type="choice", choices=[True, False], description="Enable/disable band walking exit"))
 
     def _register(self, spec: ParamSpec):
         self.params[spec.name] = spec

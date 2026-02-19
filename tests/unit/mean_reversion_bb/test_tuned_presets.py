@@ -179,4 +179,4 @@ class TestPresetCount:
 
     def test_preset_count(self, pm):
         presets = pm.list()
-        assert len(presets) == 6, f"Expected 6 presets, got {len(presets)}: {presets}"
+        assert len(presets) == 8, f"Expected 8 presets, got {len(presets)}: {presets}"

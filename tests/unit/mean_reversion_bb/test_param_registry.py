@@ -80,8 +80,8 @@ class TestParamRegistry:
         return ParamRegistry()
 
     def test_all_params_registered(self, registry):
-        """All 19 tunable parameters from config.py are registered."""
-        assert len(registry.params) == 19
+        """All 22 tunable parameters from config.py are registered."""
+        assert len(registry.params) == 22
 
     def test_expected_param_names(self, registry):
         expected = {
@@ -92,6 +92,7 @@ class TestParamRegistry:
             "rsi_period", "rsi_oversold", "rsi_overbought",
             "reversion_target", "max_holding_bars",
             "risk_per_trade", "max_position_pct", "stop_atr_multiplier",
+            "side_filter", "use_squeeze_filter", "use_band_walking_exit",
         }
         assert set(registry.params.keys()) == expected
 
@@ -117,6 +118,9 @@ class TestParamRegistry:
         assert defaults["risk_per_trade"] == config.RISK_PER_TRADE
         assert defaults["max_position_pct"] == config.MAX_POSITION_PCT
         assert defaults["stop_atr_multiplier"] == config.STOP_ATR_MULTIPLIER
+        assert defaults["side_filter"] == config.SIDE_FILTER
+        assert defaults["use_squeeze_filter"] == config.USE_SQUEEZE_FILTER
+        assert defaults["use_band_walking_exit"] == config.USE_BAND_WALKING_EXIT
 
     def test_validation_rejects_out_of_range(self, registry):
         """Validation rejects values outside defined ranges."""

@@ -75,6 +75,9 @@ from strategies.mean_reversion_bb.config import (
     ADX_PERIOD,
     ADX_THRESHOLD,
     USE_REGIME_FILTER,
+    SIDE_FILTER,
+    USE_SQUEEZE_FILTER,
+    USE_BAND_WALKING_EXIT,
 )
 
 
@@ -115,6 +118,9 @@ class MeanReversionBB(DirectionalModel):
         max_holding_bars: int = MAX_HOLDING_BARS,
         risk_per_trade: float = RISK_PER_TRADE,
         max_position_pct: float = MAX_POSITION_PCT,
+        side_filter: str = SIDE_FILTER,
+        use_squeeze_filter: bool = USE_SQUEEZE_FILTER,
+        use_band_walking_exit: bool = USE_BAND_WALKING_EXIT,
     ):
         self.bb_period = bb_period
         self.bb_std_dev = bb_std_dev
@@ -134,6 +140,9 @@ class MeanReversionBB(DirectionalModel):
         self.max_holding_bars = max_holding_bars
         self.risk_per_trade = risk_per_trade
         self.max_position_pct = max_position_pct
+        self.side_filter = side_filter
+        self.use_squeeze_filter = use_squeeze_filter
+        self.use_band_walking_exit = use_band_walking_exit
 
         # State
         self.squeeze_count: int = 0
@@ -429,12 +438,15 @@ class MeanReversionBB(DirectionalModel):
         # Regime filter: only allow entries in ranging markets
         regime_ok = is_ranging or not self.use_regime_filter
 
+        # Squeeze gate: if squeeze filter is disabled, ignore squeeze state
+        squeeze_blocks = is_squeeze and self.use_squeeze_filter
+
         # Long condition
         if (
             last_close <= last_lower_outer
             and last_rsi < self.rsi_oversold
             and vwap_deviation < self.vwap_confirmation_pct
-            and not is_squeeze
+            and not squeeze_blocks
             and regime_ok
         ):
             signal = "long"
@@ -444,10 +456,16 @@ class MeanReversionBB(DirectionalModel):
             last_close >= last_upper_outer
             and last_rsi > self.rsi_overbought
             and vwap_deviation < self.vwap_confirmation_pct
-            and not is_squeeze
+            and not squeeze_blocks
             and regime_ok
         ):
             signal = "short"
+
+        # Side filter: suppress signals based on allowed sides
+        if self.side_filter == "long_only" and signal == "short":
+            signal = "none"
+        elif self.side_filter == "short_only" and signal == "long":
+            signal = "none"
 
         return {
             "signal": signal,
@@ -491,13 +509,19 @@ class MeanReversionBB(DirectionalModel):
         side = signal["signal"]
 
         if side == "long":
-            stop_loss = signal.get("lower_outer", current_price) - self.stop_atr_multiplier * atr
+            if self.stop_atr_multiplier == 0:
+                stop_loss = 0.0
+            else:
+                stop_loss = signal.get("lower_outer", current_price) - self.stop_atr_multiplier * atr
             target = current_price + self.reversion_target * (signal["middle"] - current_price)
             partial_target = signal.get(
                 "lower_inner", (current_price + signal["middle"]) / 2
             )
         elif side == "short":
-            stop_loss = signal.get("upper_outer", current_price) + self.stop_atr_multiplier * atr
+            if self.stop_atr_multiplier == 0:
+                stop_loss = 0.0
+            else:
+                stop_loss = signal.get("upper_outer", current_price) + self.stop_atr_multiplier * atr
             target = current_price - self.reversion_target * (current_price - signal["middle"])
             partial_target = signal.get(
                 "upper_inner", (current_price + signal["middle"]) / 2
@@ -505,13 +529,17 @@ class MeanReversionBB(DirectionalModel):
         else:
             return []
 
-        stop_distance = abs(current_price - stop_loss)
-        if stop_distance > 0:
-            risk_size = self.risk_per_trade * equity / stop_distance
-            max_size = self.max_position_pct * equity / current_price
-            position_size = min(risk_size, max_size)
+        # When stop is disabled (0), size by max position; otherwise risk-based
+        if stop_loss == 0.0:
+            position_size = self.max_position_pct * equity / current_price
         else:
-            position_size = 0.0
+            stop_distance = abs(current_price - stop_loss)
+            if stop_distance > 0:
+                risk_size = self.risk_per_trade * equity / stop_distance
+                max_size = self.max_position_pct * equity / current_price
+                position_size = min(risk_size, max_size)
+            else:
+                position_size = 0.0
 
         if position_size <= 0:
             return []
@@ -567,15 +595,16 @@ class MeanReversionBB(DirectionalModel):
             return {"action": "exit", "reason": "squeeze detected while in position"}
 
         # Band walking: 3+ candles touching/beyond outer band
-        _, upper_outer, lower_outer, _, _ = self.calculate_bollinger_bands(close)
-        if len(close) >= 3 and upper_outer.notna().iloc[-1]:
-            last_3_close = close.iloc[-3:]
-            if self.position_side == "long":
-                walking = (last_3_close.values <= lower_outer.iloc[-3:].values).all()
-            else:
-                walking = (last_3_close.values >= upper_outer.iloc[-3:].values).all()
-            if walking:
-                return {"action": "exit", "reason": "band walking detected"}
+        if self.use_band_walking_exit:
+            _, upper_outer, lower_outer, _, _ = self.calculate_bollinger_bands(close)
+            if len(close) >= 3 and upper_outer.notna().iloc[-1]:
+                last_3_close = close.iloc[-3:]
+                if self.position_side == "long":
+                    walking = (last_3_close.values <= lower_outer.iloc[-3:].values).all()
+                else:
+                    walking = (last_3_close.values >= upper_outer.iloc[-3:].values).all()
+                if walking:
+                    return {"action": "exit", "reason": "band walking detected"}
 
         # Volume spike: current volume > 2x 20-period average
         if len(volume) >= 20:
