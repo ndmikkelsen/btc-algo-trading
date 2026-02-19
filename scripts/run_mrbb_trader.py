@@ -369,6 +369,17 @@ def main():
         stop_atr_multiplier=args.stop_atr_mult,
     )
 
+    # --- Auto-calculate candle limit from indicator periods ---
+    min_candles = max(
+        args.bb_period * 2,      # BB needs full period + warmup
+        args.vwap_period + 10,   # VWAP rolling window
+        args.kc_period * 2,      # KC ATR needs warmup
+        args.rsi_period * 3,     # RSI Wilder smoothing warmup
+        args.adx_period * 3,     # ADX needs DI+ warmup
+        100,                     # absolute minimum
+    )
+    candle_limit = args.candles if args.candles != 100 else max(args.candles, min_candles)
+
     # --- Build trader ---
     trader = DirectionalTrader(
         model=model,
@@ -380,7 +391,7 @@ def main():
         leverage=args.leverage,
         timeframe=args.timeframe,
         poll_interval=args.interval,
-        candle_limit=args.candles,
+        candle_limit=candle_limit,
         instance_id=args.instance_id,
     )
 
