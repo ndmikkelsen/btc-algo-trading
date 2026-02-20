@@ -25,9 +25,9 @@ kc_period: 20
 kc_atr_multiplier: 1.5
 min_squeeze_duration: 6
 
-# RSI parameters — strongest edge, keep tight
+# RSI parameters — strongest edge; 32 is optimal (sweep showed best Sharpe+return)
 rsi_period: 14
-rsi_oversold: 30
+rsi_oversold: 32
 rsi_overbought: 70
 
 # ADX / Regime filter — second strongest edge
