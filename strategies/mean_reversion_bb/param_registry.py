@@ -98,8 +98,8 @@ class ParamRegistry:
         self._register(ParamSpec("risk_per_trade", 0.02, 0.01, 0.05, 0.005, "float", description="Risk per trade as fraction of equity"))
         self._register(ParamSpec("max_position_pct", 0.25, 0.10, 0.50, 0.05, "float", description="Max position as fraction of equity"))
         self._register(ParamSpec("stop_atr_multiplier", 3.0, 1.0, 3.0, 0.25, "float", description="Stop loss ATR multiplier (0 = no stop)"))
-        self._register(ParamSpec("stop_decay_phase_1", 0.33, 0.1, 0.5, 0.05, "float", description="Fraction of max_holding_bars for first stop tightening"))
-        self._register(ParamSpec("stop_decay_phase_2", 0.66, 0.5, 0.9, 0.05, "float", description="Fraction of max_holding_bars for second stop tightening"))
+        self._register(ParamSpec("stop_decay_phase_1", 0.33, 0.01, 0.5, 0.01, "float", description="Fraction of max_holding_bars for first stop tightening (calibrate per-preset)"))
+        self._register(ParamSpec("stop_decay_phase_2", 0.66, 0.02, 0.9, 0.01, "float", description="Fraction of max_holding_bars for second stop tightening (calibrate per-preset)"))
         self._register(ParamSpec("stop_decay_mult_1", 2.0, 0.5, 2.5, 0.25, "float", description="ATR multiplier at decay phase 1"))
         self._register(ParamSpec("stop_decay_mult_2", 1.0, 0.25, 2.0, 0.25, "float", description="ATR multiplier at decay phase 2"))
 

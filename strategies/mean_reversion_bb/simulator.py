@@ -496,14 +496,14 @@ class DirectionalSimulator:
                         slippage = self.rng.uniform(0, self.slippage_pct) * stop_loss
                         exit_p = stop_loss - slippage
                         pnl = pos_size * (exit_p - entry_price)
-                        trade_log.append({"side": "long", "entry_price": entry_price, "exit_price": exit_p, "size": pos_size, "pnl": pnl, "reason": "stop_loss"})
+                        trade_log.append({"side": "long", "entry_price": entry_price, "exit_price": exit_p, "size": pos_size, "pnl": pnl, "reason": "stop_loss", "bars_held": bars_held})
                         cash += pos_size * exit_p
                         pos_side = None; exit_done = True
                     elif h >= target:
                         slippage = self.rng.uniform(0, self.slippage_pct) * target
                         exit_p = target - slippage
                         pnl = pos_size * (exit_p - entry_price)
-                        trade_log.append({"side": "long", "entry_price": entry_price, "exit_price": exit_p, "size": pos_size, "pnl": pnl, "reason": "target"})
+                        trade_log.append({"side": "long", "entry_price": entry_price, "exit_price": exit_p, "size": pos_size, "pnl": pnl, "reason": "target", "bars_held": bars_held})
                         cash += pos_size * exit_p
                         pos_side = None; exit_done = True
                     elif not partial_exited and h >= partial_target:
@@ -517,14 +517,14 @@ class DirectionalSimulator:
                         slippage = self.rng.uniform(0, self.slippage_pct) * stop_loss
                         exit_p = stop_loss + slippage
                         pnl = pos_size * (entry_price - exit_p)
-                        trade_log.append({"side": "short", "entry_price": entry_price, "exit_price": exit_p, "size": pos_size, "pnl": pnl, "reason": "stop_loss"})
+                        trade_log.append({"side": "short", "entry_price": entry_price, "exit_price": exit_p, "size": pos_size, "pnl": pnl, "reason": "stop_loss", "bars_held": bars_held})
                         cash -= pos_size * exit_p
                         pos_side = None; exit_done = True
                     elif lo <= target:
                         slippage = self.rng.uniform(0, self.slippage_pct) * target
                         exit_p = target + slippage
                         pnl = pos_size * (entry_price - exit_p)
-                        trade_log.append({"side": "short", "entry_price": entry_price, "exit_price": exit_p, "size": pos_size, "pnl": pnl, "reason": "target"})
+                        trade_log.append({"side": "short", "entry_price": entry_price, "exit_price": exit_p, "size": pos_size, "pnl": pnl, "reason": "target", "bars_held": bars_held})
                         cash -= pos_size * exit_p
                         pos_side = None; exit_done = True
                     elif not partial_exited and lo <= partial_target:
@@ -566,7 +566,7 @@ class DirectionalSimulator:
                         else:
                             exit_p = c + slippage
                             pnl = pos_size * (entry_price - exit_p)
-                        trade_log.append({"side": pos_side, "entry_price": entry_price, "exit_price": exit_p, "size": pos_size, "pnl": pnl, "reason": "max holding period exceeded"})
+                        trade_log.append({"side": pos_side, "entry_price": entry_price, "exit_price": exit_p, "size": pos_size, "pnl": pnl, "reason": "max holding period exceeded", "bars_held": bars_held})
                         if pos_side == "long":
                             cash += pos_size * exit_p
                         else:
@@ -680,7 +680,7 @@ class DirectionalSimulator:
             else:
                 exit_p = c + slippage
                 pnl = pos_size * (entry_price - exit_p)
-            trade_log.append({"side": pos_side, "entry_price": entry_price, "exit_price": exit_p, "size": pos_size, "pnl": pnl, "reason": "end_of_backtest"})
+            trade_log.append({"side": pos_side, "entry_price": entry_price, "exit_price": exit_p, "size": pos_size, "pnl": pnl, "reason": "end_of_backtest", "bars_held": bars_held})
             if pos_side == "long":
                 cash += pos_size * exit_p
             else:

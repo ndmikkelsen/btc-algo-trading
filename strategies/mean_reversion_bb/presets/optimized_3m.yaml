@@ -37,14 +37,15 @@ use_regime_filter: true
 reversion_target: 0.9
 max_holding_bars: 480
 
-# Risk parameters — no stop, conservative sizing
+# Risk parameters — 3x ATR stop with gentle decay
 risk_per_trade: 0.02
 max_position_pct: 0.25
 stop_atr_multiplier: 3.0
-stop_decay_phase_1: 0.33
-stop_decay_phase_2: 0.66
-stop_decay_mult_1: 2.0
-stop_decay_mult_2: 1.0
+# Phases calibrated for max_holding_bars=480: P1@bar17, P2@bar34 (~51/102 min)
+stop_decay_phase_1: 0.035
+stop_decay_phase_2: 0.071
+stop_decay_mult_1: 2.5
+stop_decay_mult_2: 2.0
 
 # Configurable toggles
 use_squeeze_filter: false

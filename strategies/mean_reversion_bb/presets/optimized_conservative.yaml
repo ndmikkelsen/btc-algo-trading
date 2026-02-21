@@ -3,7 +3,7 @@ name: optimized_conservative
 description: >
   Conservative variant of the optimized preset. Stricter ADX filter (18)
   ensures only clear ranging markets, halved risk per trade (1%), and
-  shorter time-based exit (12 hours). Same long-only, no-stop, simplified
+  shorter max hold (12 hours). Same long-only, gentle decay stop, simplified
   filter approach as the optimized preset.
 regime: ranging
 
@@ -34,18 +34,19 @@ adx_period: 14
 adx_threshold: 18.0
 use_regime_filter: true
 
-# Signal parameters — time-based exit (12h at 5m candles)
+# Signal parameters — max hold 12h at 5m candles
 reversion_target: 0.9
 max_holding_bars: 144
 
-# Risk parameters — no stop, half risk
+# Risk parameters — 3x ATR stop with gentle decay, half risk
 risk_per_trade: 0.01
 max_position_pct: 0.15
 stop_atr_multiplier: 3.0
-stop_decay_phase_1: 0.33
-stop_decay_phase_2: 0.66
-stop_decay_mult_1: 2.0
-stop_decay_mult_2: 1.0
+# Phases calibrated for max_holding_bars=144: P1@bar10, P2@bar20
+stop_decay_phase_1: 0.069
+stop_decay_phase_2: 0.139
+stop_decay_mult_1: 2.5
+stop_decay_mult_2: 2.0
 
 # Configurable toggles — simplified
 use_squeeze_filter: false
