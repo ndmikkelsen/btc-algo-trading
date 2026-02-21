@@ -73,6 +73,7 @@ class Position:
     target_price: float = 0.0
     entry_time: Optional[datetime] = None
     bars_held: int = 0
+    band_ref: float = 0.0
 
 
 @dataclass
@@ -272,6 +273,7 @@ class DirectionalTrader:
 
             # Record position
             pos_side = "long" if side == "buy" else "short"
+            band_ref = order.get("band_ref", 0.0)
             self.state.position = Position(
                 side=pos_side,
                 entry_price=entry_price,
@@ -279,7 +281,10 @@ class DirectionalTrader:
                 stop_price=stop_price,
                 target_price=target_price,
                 entry_time=datetime.now(),
+                band_ref=band_ref,
             )
+            # Sync model state for time-decay stop computation
+            self.model.entry_band_level = band_ref if band_ref else None
 
             color = Colors.GREEN if pos_side == "long" else Colors.RED
             arrow = "LONG" if pos_side == "long" else "SHORT"
@@ -360,6 +365,7 @@ class DirectionalTrader:
             )
 
             self.state.position = None
+            self.model.entry_band_level = None
 
         except Exception as e:
             self.state.errors.append(f"Exit error: {e}")
@@ -414,6 +420,14 @@ class DirectionalTrader:
                 close = df["close"]
                 volume = df["volume"]
 
+                # Compute ATR once per iteration (used by both risk mgmt and orders)
+                tr = pd.concat([
+                    high - low,
+                    (high - close.shift(1)).abs(),
+                    (low - close.shift(1)).abs(),
+                ], axis=1).max(axis=1)
+                atr = float(tr.rolling(14).mean().iloc[-1])
+
                 # Check stop/target first
                 if self._check_stop_target():
                     self._stop_event.wait(self.poll_interval)
@@ -426,6 +440,7 @@ class DirectionalTrader:
                         current_price=self.state.current_price,
                         close=close,
                         volume=volume,
+                        atr=atr,
                     )
                     action = risk_action.get("action", "hold")
                     if action in ("exit", "partial_exit"):
@@ -434,13 +449,20 @@ class DirectionalTrader:
                     elif action == "tighten_stop":
                         new_stop = risk_action.get("new_stop")
                         if new_stop is not None:
-                            self.state.position.stop_price = new_stop
-                            print(
-                                f"{Colors.YELLOW}"
-                                f"[{datetime.now().strftime('%H:%M:%S')}] "
-                                f"Stop tightened to ${new_stop:,.2f}"
-                                f"{Colors.RESET}"
+                            pos = self.state.position
+                            # Only apply if tighter (closer to current price)
+                            is_tighter = (
+                                (pos.side == "long" and new_stop > pos.stop_price)
+                                or (pos.side == "short" and new_stop < pos.stop_price)
                             )
+                            if is_tighter:
+                                pos.stop_price = new_stop
+                                print(
+                                    f"{Colors.YELLOW}"
+                                    f"[{datetime.now().strftime('%H:%M:%S')}] "
+                                    f"Stop tightened to ${new_stop:,.2f}"
+                                    f"{Colors.RESET}"
+                                )
                 else:
                     # Generate signals
                     signal = self.model.calculate_signals(
@@ -455,14 +477,6 @@ class DirectionalTrader:
                     print(self.format_status_line(signal, self.state.position))
 
                     if sig_type in ("long", "short", "squeeze_breakout"):
-                        # Calculate ATR for stop placement
-                        tr = pd.concat([
-                            high - low,
-                            (high - close.shift(1)).abs(),
-                            (low - close.shift(1)).abs(),
-                        ], axis=1).max(axis=1)
-                        atr = float(tr.rolling(14).mean().iloc[-1])
-
                         orders = self.model.generate_orders(
                             signal=signal,
                             current_price=self.state.current_price,

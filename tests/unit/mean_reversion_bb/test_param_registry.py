@@ -80,8 +80,8 @@ class TestParamRegistry:
         return ParamRegistry()
 
     def test_all_params_registered(self, registry):
-        """All 28 tunable parameters from config.py are registered."""
-        assert len(registry.params) == 28
+        """All 32 tunable parameters from config.py are registered."""
+        assert len(registry.params) == 32
 
     def test_expected_param_names(self, registry):
         expected = {
@@ -92,6 +92,8 @@ class TestParamRegistry:
             "rsi_period", "rsi_oversold", "rsi_overbought",
             "reversion_target", "max_holding_bars",
             "risk_per_trade", "max_position_pct", "stop_atr_multiplier",
+            "stop_decay_phase_1", "stop_decay_phase_2",
+            "stop_decay_mult_1", "stop_decay_mult_2",
             "short_bb_std_dev", "short_rsi_threshold",
             "short_max_holding_bars", "short_position_pct",
             "use_trend_filter", "trend_ema_period",
@@ -121,6 +123,10 @@ class TestParamRegistry:
         assert defaults["risk_per_trade"] == config.RISK_PER_TRADE
         assert defaults["max_position_pct"] == config.MAX_POSITION_PCT
         assert defaults["stop_atr_multiplier"] == config.STOP_ATR_MULTIPLIER
+        assert defaults["stop_decay_phase_1"] == config.STOP_DECAY_PHASE_1
+        assert defaults["stop_decay_phase_2"] == config.STOP_DECAY_PHASE_2
+        assert defaults["stop_decay_mult_1"] == config.STOP_DECAY_MULT_1
+        assert defaults["stop_decay_mult_2"] == config.STOP_DECAY_MULT_2
         assert defaults["side_filter"] == config.SIDE_FILTER
         assert defaults["use_squeeze_filter"] == config.USE_SQUEEZE_FILTER
         assert defaults["use_band_walking_exit"] == config.USE_BAND_WALKING_EXIT

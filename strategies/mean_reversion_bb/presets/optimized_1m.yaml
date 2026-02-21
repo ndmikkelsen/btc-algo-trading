@@ -41,7 +41,11 @@ max_holding_bars: 1440
 # Risk parameters — no stop, conservative sizing
 risk_per_trade: 0.02
 max_position_pct: 0.25
-stop_atr_multiplier: 0
+stop_atr_multiplier: 3.0
+stop_decay_phase_1: 0.33
+stop_decay_phase_2: 0.66
+stop_decay_mult_1: 2.0
+stop_decay_mult_2: 1.0
 
 # Configurable toggles
 use_squeeze_filter: false

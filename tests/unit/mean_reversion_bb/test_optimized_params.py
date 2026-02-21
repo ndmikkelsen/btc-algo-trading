@@ -1,13 +1,12 @@
 """Tests for optimized configurable parameters: side_filter, squeeze toggle,
-band walking toggle, and no-stop mode."""
+and band walking toggle."""
 
 import pytest
 import numpy as np
 import pandas as pd
 
 from strategies.mean_reversion_bb.model import MeanReversionBB
-from strategies.mean_reversion_bb.simulator import DirectionalSimulator
-from tests.unit.mean_reversion_bb.conftest import make_ohlcv_series, make_ohlcv_df
+from tests.unit.mean_reversion_bb.conftest import make_ohlcv_series
 
 
 # ---------------------------------------------------------------------------
@@ -178,80 +177,6 @@ class TestBandWalkingExit:
         else:
             # Other exits may fire first — that's ok for regression
             assert result["action"] in ("exit", "tighten_stop", "hold")
-
-
-# ---------------------------------------------------------------------------
-# No-stop mode (stop_atr_multiplier == 0)
-# ---------------------------------------------------------------------------
-
-
-class TestNoStopMode:
-
-    def test_no_stop_when_multiplier_zero(self):
-        """generate_orders returns stop_loss=0 when stop_atr_multiplier=0."""
-        model = MeanReversionBB(stop_atr_multiplier=0)
-        signal = {
-            "signal": "long",
-            "middle": 100.0,
-            "upper_outer": 104.0,
-            "lower_outer": 96.0,
-            "upper_inner": 102.0,
-            "lower_inner": 98.0,
-        }
-        orders = model.generate_orders(signal, 96.0, 10000.0, 1.0)
-        assert len(orders) == 1
-        assert orders[0]["stop_loss"] == 0.0
-        assert orders[0]["position_size"] > 0
-
-    def test_no_stop_short_when_multiplier_zero(self):
-        """generate_orders returns stop_loss=0 for short when stop_atr_multiplier=0."""
-        model = MeanReversionBB(stop_atr_multiplier=0)
-        signal = {
-            "signal": "short",
-            "middle": 100.0,
-            "upper_outer": 104.0,
-            "lower_outer": 96.0,
-            "upper_inner": 102.0,
-            "lower_inner": 98.0,
-        }
-        orders = model.generate_orders(signal, 104.0, 10000.0, 1.0)
-        assert len(orders) == 1
-        assert orders[0]["stop_loss"] == 0.0
-        assert orders[0]["position_size"] > 0
-
-    def test_simulator_skips_stop_when_zero_step(self):
-        """Simulator step-based doesn't exit on stop when stop_price=0."""
-        model = MeanReversionBB()
-        sim = DirectionalSimulator(model, initial_equity=10_000, slippage_pct=0.0, random_seed=1)
-
-        # Manually set up a long position with stop=0 (no stop)
-        sim.position_side = "long"
-        sim.position_size = 1.0
-        sim.entry_price = 100.0
-        sim.stop_loss = 0.0  # no stop
-        sim.target = 110.0
-        sim.partial_target = 105.0
-        sim.cash = 10_000 - 100.0
-        model.position_side = "long"
-        model.bars_held = 0
-
-        # Feed candle with low well below where a normal stop would be
-        result = sim.step(100, 100, 80, 85, 1000)
-        # Position should still be open (stop=0 means no stop)
-        assert sim.position_side == "long"
-        assert len(sim.trade_log) == 0
-
-    def test_simulator_skips_stop_when_zero_fast(self):
-        """Simulator run_backtest_fast doesn't exit on stop when stop_price=0."""
-        model = MeanReversionBB(stop_atr_multiplier=0, use_regime_filter=False, bb_std_dev=2.0)
-        sim = DirectionalSimulator(model, initial_equity=10_000, random_seed=42)
-
-        df = make_ohlcv_df(200)
-        result = sim.run_backtest_fast(df)
-
-        # All trades should have no stop_loss exits
-        for trade in result["trade_log"]:
-            assert trade["reason"] != "stop_loss"
 
 
 # ---------------------------------------------------------------------------

@@ -39,7 +39,11 @@ max_holding_bars: 50
 # Risk parameters
 risk_per_trade: 0.01
 max_position_pct: 0.15
-stop_atr_multiplier: 2.5
+stop_atr_multiplier: 3.0
+stop_decay_phase_1: 0.33
+stop_decay_phase_2: 0.66
+stop_decay_mult_1: 2.0
+stop_decay_mult_2: 1.0
 
 # Configurable toggles
 side_filter: both

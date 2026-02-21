@@ -128,10 +128,18 @@ class DirectionalSimulator:
         if self.position_side is not None and action_taken == "none":
             c = pd.Series(self.close_history)
             v = pd.Series(self.volume_history)
-            risk = self.model.manage_risk(close, c, v)
+            atr = self._compute_atr()
+            risk = self.model.manage_risk(close, c, v, atr=atr)
             if risk["action"] == "exit":
                 self._exit_position(close, risk["reason"])
                 action_taken = "risk_exit"
+            elif risk["action"] == "tighten_stop" and "new_stop" in risk:
+                if self.position_side == "long":
+                    if risk["new_stop"] > self.stop_loss:
+                        self.stop_loss = risk["new_stop"]
+                else:
+                    if risk["new_stop"] < self.stop_loss:
+                        self.stop_loss = risk["new_stop"]
 
         # 5. Record equity
         mark_to_market = self._mark_to_market(close)
@@ -205,6 +213,7 @@ class DirectionalSimulator:
         self.model.position_side = order["side"]
         self.model.entry_price = actual_price
         self.model.bars_held = 0
+        self.model.entry_band_level = order.get("band_ref")
 
         # Adjust cash for position entry
         if self.position_side == "long":
@@ -215,8 +224,8 @@ class DirectionalSimulator:
     def _check_position_exits(self, high: float, low: float) -> Optional[str]:
         """Check if stop or target is hit within the candle's range."""
         if self.position_side == "long":
-            # Stop hit (skip if stop is disabled)
-            if self.stop_loss != 0 and low <= self.stop_loss:
+            # Stop hit
+            if low <= self.stop_loss:
                 self._exit_position(self.stop_loss, "stop_loss")
                 return "stop_loss"
             # Target hit
@@ -229,8 +238,8 @@ class DirectionalSimulator:
                 return "partial_exit"
 
         elif self.position_side == "short":
-            # Stop hit (skip if stop is disabled)
-            if self.stop_loss != 0 and high >= self.stop_loss:
+            # Stop hit
+            if high >= self.stop_loss:
                 self._exit_position(self.stop_loss, "stop_loss")
                 return "stop_loss"
             # Target hit
@@ -285,6 +294,7 @@ class DirectionalSimulator:
         self.model.position_side = None
         self.model.entry_price = None
         self.model.bars_held = 0
+        self.model.entry_band_level = None
 
     def _calculate_pnl(self, exit_price: float, size: float) -> float:
         """Calculate PnL for closing *size* units at exit_price."""
@@ -467,6 +477,7 @@ class DirectionalSimulator:
         partial_target = 0.0
         partial_exited = False
         bars_held = 0
+        band_ref = 0.0
         cash = self.initial_equity
         equity_curve: List[Dict] = []
         trade_log: List[Dict] = []
@@ -480,7 +491,7 @@ class DirectionalSimulator:
             if pos_side is not None:
                 exit_done = False
                 if pos_side == "long":
-                    if stop_loss != 0 and lo <= stop_loss:
+                    if lo <= stop_loss:
                         pnl = pos_size * (stop_loss - entry_price)
                         slippage = self.rng.uniform(0, self.slippage_pct) * stop_loss
                         exit_p = stop_loss - slippage
@@ -502,7 +513,7 @@ class DirectionalSimulator:
                         pos_size -= half
                         partial_exited = True
                 elif pos_side == "short":
-                    if stop_loss != 0 and h >= stop_loss:
+                    if h >= stop_loss:
                         slippage = self.rng.uniform(0, self.slippage_pct) * stop_loss
                         exit_p = stop_loss + slippage
                         pnl = pos_size * (entry_price - exit_p)
@@ -527,6 +538,26 @@ class DirectionalSimulator:
                 if pos_side is not None and not exit_done:
                     bars_held += 1
                     eff_max_bars = SHORT_MAX_HOLDING_BARS if pos_side == "short" else MAX_HOLDING_BARS
+
+                    # Time-decay stop tightening
+                    atr_v = atr_arr[i] if not np.isnan(atr_arr[i]) else 0.0
+                    if band_ref != 0.0 and atr_v > 0:
+                        progress = bars_held / eff_max_bars if eff_max_bars > 0 else 0.0
+                        if progress >= self.model.stop_decay_phase_2:
+                            decay_mult = self.model.stop_decay_mult_2
+                        elif progress >= self.model.stop_decay_phase_1:
+                            decay_mult = self.model.stop_decay_mult_1
+                        else:
+                            decay_mult = STOP_ATR_MULTIPLIER
+                        if pos_side == "long":
+                            new_stop = band_ref - decay_mult * atr_v
+                            if new_stop > stop_loss:
+                                stop_loss = new_stop
+                        else:
+                            new_stop = band_ref + decay_mult * atr_v
+                            if new_stop < stop_loss:
+                                stop_loss = new_stop
+
                     if bars_held >= eff_max_bars:
                         slippage = self.rng.uniform(0, self.slippage_pct) * c
                         if pos_side == "long":
@@ -596,32 +627,23 @@ class DirectionalSimulator:
 
                 if signal and atr_v > 0:
                     if signal == "long":
-                        if STOP_ATR_MULTIPLIER == 0:
-                            stop_loss = 0.0
-                        else:
-                            stop_loss = lo_v - STOP_ATR_MULTIPLIER * atr_v
+                        stop_loss = lo_v - STOP_ATR_MULTIPLIER * atr_v
                         tgt = c + REVERSION_TARGET * (mid_v - c)
                         ptgt = li_arr[i] if not np.isnan(li_arr[i]) else (c + mid_v) / 2
                     else:
-                        if STOP_ATR_MULTIPLIER == 0:
-                            stop_loss = 0.0
-                        else:
-                            stop_loss = uo_v + STOP_ATR_MULTIPLIER * atr_v
+                        stop_loss = uo_v + STOP_ATR_MULTIPLIER * atr_v
                         tgt = c - REVERSION_TARGET * (c - mid_v)
                         ptgt = ui_arr[i] if not np.isnan(ui_arr[i]) else (c + mid_v) / 2
 
                     equity_now = cash  # simplified for flat position
                     eff_pos_pct = SHORT_POSITION_PCT if signal == "short" else MAX_POSITION_PCT
-                    if stop_loss == 0.0:
-                        p_size = eff_pos_pct * equity_now / c
+                    stop_dist = abs(c - stop_loss)
+                    if stop_dist > 0:
+                        risk_size = RISK_PER_TRADE * equity_now / stop_dist
+                        max_size = eff_pos_pct * equity_now / c
+                        p_size = min(risk_size, max_size)
                     else:
-                        stop_dist = abs(c - stop_loss)
-                        if stop_dist > 0:
-                            risk_size = RISK_PER_TRADE * equity_now / stop_dist
-                            max_size = eff_pos_pct * equity_now / c
-                            p_size = min(risk_size, max_size)
-                        else:
-                            p_size = 0.0
+                        p_size = 0.0
 
                     if p_size > 0:
                         slippage = self.rng.uniform(0, self.slippage_pct) * c
@@ -633,6 +655,7 @@ class DirectionalSimulator:
                         partial_target = ptgt
                         partial_exited = False
                         bars_held = 0
+                        band_ref = lo_v if signal == "long" else uo_v
                         if signal == "long":
                             cash -= p_size * entry_p
                         else:
@@ -694,3 +717,4 @@ class DirectionalSimulator:
         self.model.position_side = None
         self.model.entry_price = None
         self.model.bars_held = 0
+        self.model.entry_band_level = None

@@ -183,7 +183,6 @@ class TestAsymmetricPositionSizing:
         model = MeanReversionBB(
             max_position_pct=0.25,
             short_position_pct=0.10,
-            stop_atr_multiplier=0,
         )
         signal = {
             "signal": "short",
@@ -195,7 +194,9 @@ class TestAsymmetricPositionSizing:
         }
         orders = model.generate_orders(signal, 104.0, 10000.0, 1.0)
         assert len(orders) == 1
-        # With no stop, size = short_position_pct * equity / price
+        # Risk-based sizing: risk_size = 0.02*10000/3.0 = 66.67
+        # Max size cap: short_position_pct * equity / price = 0.10*10000/104 = 9.615
+        # position_size = min(risk_size, max_size) → capped by short_position_pct
         expected_size = 0.10 * 10000.0 / 104.0
         assert orders[0]["position_size"] == pytest.approx(expected_size, rel=0.01)
 
@@ -204,7 +205,6 @@ class TestAsymmetricPositionSizing:
         model = MeanReversionBB(
             max_position_pct=0.25,
             short_position_pct=0.10,
-            stop_atr_multiplier=0,
         )
         signal = {
             "signal": "long",
@@ -216,6 +216,9 @@ class TestAsymmetricPositionSizing:
         }
         orders = model.generate_orders(signal, 96.0, 10000.0, 1.0)
         assert len(orders) == 1
+        # Risk-based sizing: risk_size = 0.02*10000/3.0 = 66.67
+        # Max size cap: max_position_pct * equity / price = 0.25*10000/96 = 26.04
+        # position_size = min(risk_size, max_size) → capped by max_position_pct
         expected_size = 0.25 * 10000.0 / 96.0
         assert orders[0]["position_size"] == pytest.approx(expected_size, rel=0.01)
 

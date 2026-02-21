@@ -167,7 +167,10 @@ class TestHighRRPreset:
 
     def test_high_rr_has_tighter_stop(self, pm, default_preset):
         high_rr = pm.load("high_rr")
-        assert high_rr["stop_atr_multiplier"] < default_preset["stop_atr_multiplier"]
+        # With time-decay stops, the initial multiplier matches default (3.0)
+        # but the decay phases tighten to stop_decay_mult_2 over the trade lifetime
+        assert high_rr["stop_atr_multiplier"] <= default_preset["stop_atr_multiplier"]
+        assert high_rr["stop_decay_mult_2"] <= high_rr["stop_atr_multiplier"]
 
     def test_high_rr_has_longer_hold(self, pm, default_preset):
         high_rr = pm.load("high_rr")
