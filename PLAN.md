@@ -4,11 +4,40 @@
 
 ## Recent Work
 
+**Session**: 2026-02-21
+**Branch**: feat/mean-reversion-bb
+**Last Commit**: 4528751 - docs: archive MRBB validation results -- NO-GO decision
+
+### Major Milestone: MRBB Strategy Shelved (NO-GO)
+
+- **5-phase validation pipeline** executed with parallel agent teams
+- **Wide stop sweep**: 5.0x ATR gentle decay best (0.57 Sharpe gross, +3.97%)
+- **Fee analysis**: 0.06% taker fee destroys all configs (best: +3.97% gross -> -15.12% net)
+- **Regime analysis**: only ranging markets profitable; trending-up toxic for long-only MR
+- **Statistical significance**: p=0.32, 95% CI spans zero -- no significant edge
+- **Walk-forward/CPCV**: signal is real (PBO=20%) but too weak for fees
+- **Decision**: NO-GO. Strategy shelved. Evidence in `.rules/patterns/mrbb-validation-results.md`
+
+### Architecture Changes
+
+- Added `taker_fee` parameter to DirectionalSimulator for explicit fee modeling
+- 5 new analysis scripts committed for reproducibility (sweep, fee, regime, significance, wfo)
+- Knowledge garden updated with comprehensive validation evidence
+
+### Next Major Steps
+
+- Focus on A-S model profitability (btc-algo-trading-zxd)
+- If revisiting MRBB: 1h+ timeframe, maker-only orders, stricter entry filters
+- stat_arb model implementation ready to pick up (btc-algo-trading-cz2)
+
+---
+
 **Session**: 2026-02-12
 **Branch**: algo-imp
 **Last Commit**: 792e58a - chore: sync and format to-do.md from Beads
 
 ### Major Milestone: Bybit Futures HFT System
+
 - **Pivoted from MEXC to Bybit** - Discovered MEXC Futures is institutional-only
 - **Complete Bybit Futures integration** with 50x leverage support
 - **Liquidation protection system** - Emergency position reduction at 20% threshold
@@ -17,6 +46,7 @@
 - **Full documentation suite** - DEPLOYMENT.md, README_FUTURES.md, PRE_DEPLOYMENT_CHECKLIST.md
 
 ### Architecture Changes
+
 - Added bybit_futures_client.py (600+ lines) - Production Bybit API client with liquidation monitoring
 - Updated live_trader.py - Futures mode support, position tracking (vs inventory)
 - Updated config.py - Futures configuration (leverage, liquidation thresholds)
@@ -25,6 +55,7 @@
 - Dual exchange support - MEXC spot (0% maker fees) + Bybit futures (50x leverage)
 
 ### Next Major Steps
+
 - Week 1: Run automated test suite on server (Task #6)
 - Week 1: Complete pre-deployment checklist (Task #7)
 - Week 2: Conservative live test with 10x leverage (Task #8)
@@ -46,6 +77,7 @@ The Avellaneda-Stoikov (2008) model is a mathematical framework for optimal mark
 ## Key Formulas
 
 ### Reservation Price
+
 ```
 r = S - q × γ × σ² × (T - t)
 ```
@@ -57,6 +89,7 @@ Where:
 - (T - t) = Time remaining in trading session
 
 ### Optimal Spread
+
 ```
 δ = γ × σ² × (T - t) + (2/γ) × ln(1 + γ/κ)
 ```
@@ -64,6 +97,7 @@ Where:
 - κ = Order book liquidity parameter
 
 ### Optimal Quotes
+
 ```
 bid = r - δ/2
 ask = r + δ/2
@@ -72,6 +106,7 @@ ask = r + δ/2
 ## Milestones
 
 ### M1: Core Model Implementation ✅
+
 - [x] Implement volatility estimation (rolling window)
 - [x] Implement reservation price calculation
 - [x] Implement optimal spread calculation
@@ -79,6 +114,7 @@ ask = r + δ/2
 - **Location**: `strategies/avellaneda_stoikov/model.py`
 
 ### M2: Order Management ✅
+
 - [x] Implement quote generation (bid/ask prices)
 - [x] Implement inventory tracking
 - [x] Implement position limits
@@ -86,6 +122,7 @@ ask = r + δ/2
 - **Location**: `strategies/avellaneda_stoikov/order_manager.py`
 
 ### M3: Backtesting Framework ✅
+
 - [x] Build market making backtester (different from directional)
 - [x] Simulate order fills based on price movement
 - [x] Track P&L including spread capture
@@ -93,6 +130,7 @@ ask = r + δ/2
 - **Location**: `strategies/avellaneda_stoikov/simulator.py`, `scripts/run_as_backtest.py`
 
 ### M4: Parameter Optimization ✅
+
 - [x] Tune risk aversion (γ) → 0.1
 - [x] Tune volatility window → 20 candles
 - [x] Tune order book liquidity (κ) → 1.5
@@ -101,6 +139,7 @@ ask = r + δ/2
 - **Location**: `strategies/avellaneda_stoikov/config_optimized.py`
 
 ### M5: Paper Trading Validation 🔄
+
 - [ ] Run paper trader on Bybit testnet for 1+ week
 - [ ] Monitor fill rates and spread capture
 - [ ] Validate inventory management in live conditions
@@ -109,6 +148,7 @@ ask = r + δ/2
 - **Location**: `scripts/run_paper_trader.py`, `strategies/avellaneda_stoikov/live_trader.py`
 
 ### M6: Live Trading Deployment
+
 - [ ] Create Bybit mainnet API keys
 - [ ] Configure secure credential management
 - [ ] Set initial capital allocation ($500-1000)
@@ -167,6 +207,7 @@ Implemented isolated Cognee stack for btc-algo-trading knowledge base:
 - ~~Risk management rules?~~ → **Implemented in risk_manager.py**
 
 ### New Questions
+
 - How long should paper trading validation run before going live?
 - What's the minimum capital for meaningful live testing?
 - Should we add more trading pairs beyond BTC/USDT?
