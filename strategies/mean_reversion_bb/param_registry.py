@@ -99,6 +99,16 @@ class ParamRegistry:
         self._register(ParamSpec("max_position_pct", 0.25, 0.10, 0.50, 0.05, "float", description="Max position as fraction of equity"))
         self._register(ParamSpec("stop_atr_multiplier", 2.5, 0.0, 3.0, 0.25, "float", description="Stop loss ATR multiplier (0 = no stop)"))
 
+        # Asymmetric short parameters
+        self._register(ParamSpec("short_bb_std_dev", 2.5, 2.0, 4.0, 0.25, "float", description="BB std dev for short entry band (wider = stricter)"))
+        self._register(ParamSpec("short_rsi_threshold", 70, 65, 90, 5, "int", description="RSI threshold for short entry (higher = stricter)"))
+        self._register(ParamSpec("short_max_holding_bars", 50, 12, 288, 12, "int", description="Max bars to hold short position"))
+        self._register(ParamSpec("short_position_pct", 0.25, 0.05, 0.50, 0.05, "float", description="Max short position as fraction of equity"))
+
+        # Trend filter parameters
+        self._register(ParamSpec("use_trend_filter", False, param_type="choice", choices=[True, False], description="Enable trend direction gating for entries"))
+        self._register(ParamSpec("trend_ema_period", 50, 20, 200, 10, "int", description="EMA period for trend direction detection"))
+
         # Configurable toggles
         self._register(ParamSpec("side_filter", "both", param_type="choice", choices=["both", "long_only", "short_only"], description="Side filter: both, long_only, or short_only"))
         self._register(ParamSpec("use_squeeze_filter", True, param_type="choice", choices=[True, False], description="Enable/disable squeeze filter"))

@@ -287,6 +287,9 @@ def main():
             "stop_atr_multiplier", "reversion_target", "max_holding_bars",
             "risk_per_trade", "max_position_pct", "side_filter",
             "use_squeeze_filter", "use_band_walking_exit",
+            "short_bb_std_dev", "short_rsi_threshold",
+            "short_max_holding_bars", "short_position_pct",
+            "use_trend_filter", "trend_ema_period",
         ]
         extra_model_kwargs = {k: preset[k] for k in _EXTRA_MODEL_KEYS if k in preset}
         if not args.quiet:

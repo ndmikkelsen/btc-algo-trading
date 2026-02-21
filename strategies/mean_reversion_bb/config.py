@@ -87,8 +87,46 @@ RISK_PER_TRADE = 0.02
 MAX_POSITION_PCT = 0.25
 
 # Stop loss: distance beyond band (ATR multiplier)
-# Optimized: wider stops for MR (was 1.5x; literature warns tight stops hurt MR)
-STOP_ATR_MULTIPLIER = 2.5
+# 3.0x gives room for initial reversion; decays to 1.0x over trade lifetime
+STOP_ATR_MULTIPLIER = 3.0
+
+# Time-decay stop parameters: stops tighten as trade ages
+# Phase boundaries as fraction of max_holding_bars
+STOP_DECAY_PHASE_1 = 0.33  # First tightening at 33% of max holding bars
+STOP_DECAY_PHASE_2 = 0.66  # Second tightening at 66% of max holding bars
+# ATR multipliers at each decay phase (decay from STOP_ATR_MULTIPLIER)
+STOP_DECAY_MULT_1 = 2.0    # Tighten to 2.0x ATR at phase 1
+STOP_DECAY_MULT_2 = 1.0    # Tighten to 1.0x ATR at phase 2
+
+# =============================================================================
+# Asymmetric Short Parameters
+# =============================================================================
+# Separate thresholds for short entries — research shows shorts need stricter
+# conditions in crypto (wider bands, higher RSI, shorter hold, smaller size).
+# Defaults match long-side values for backward compatibility;
+# the bidirectional preset overrides them.
+
+# BB std dev for short entry band (wider = fewer but higher-conviction entries)
+SHORT_BB_STD_DEV = BB_STD_DEV  # 2.5 default, bidirectional preset uses 3.0
+
+# RSI threshold for short entry (higher = only extreme overbought)
+SHORT_RSI_THRESHOLD = RSI_OVERBOUGHT  # 70 default, bidirectional preset uses 80
+
+# Max holding bars for shorts (shorter = cut losers faster)
+SHORT_MAX_HOLDING_BARS = MAX_HOLDING_BARS  # 50 default, bidirectional preset uses 48
+
+# Max position size for shorts as % of equity (smaller = reduced risk)
+SHORT_POSITION_PCT = MAX_POSITION_PCT  # 0.25 default, bidirectional preset uses 0.10
+
+# =============================================================================
+# Trend Filter Parameters
+# =============================================================================
+
+# Enable/disable trend direction gating (shorts only in bearish/neutral)
+USE_TREND_FILTER = False  # Disabled by default for backward compatibility
+
+# EMA period for trend detection (50 for 5m candles ≈ ~4h lookback)
+TREND_EMA_PERIOD = 50
 
 # =============================================================================
 # Configurable Toggles

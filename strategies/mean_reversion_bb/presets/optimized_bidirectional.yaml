@@ -1,0 +1,59 @@
+# Optimized Bidirectional MRBB preset — asymmetric long/short parameters
+name: optimized_bidirectional
+description: >
+  Research-backed bidirectional strategy: longs use the same proven optimized
+  settings, shorts use stricter asymmetric parameters (wider 3.0σ BB, RSI>80,
+  10% max position, 4h max hold). Trend filter gates shorts to bearish/neutral
+  regimes only. Based on academic research showing BTC negative returns revert
+  faster and with greater magnitude than positive returns.
+regime: all
+
+# Side filter — both sides enabled with asymmetric constraints
+side_filter: both
+
+# Bollinger Band parameters (long side, unchanged from optimized)
+bb_period: 20
+bb_std_dev: 2.5
+bb_inner_std_dev: 1.0
+
+# VWAP parameters — confirmation effectively disabled
+vwap_period: 50
+vwap_confirmation_pct: 1.0
+
+# Keltner Channel / Squeeze parameters
+kc_period: 20
+kc_atr_multiplier: 1.5
+min_squeeze_duration: 6
+
+# RSI parameters — longs use proven 32 threshold
+rsi_period: 14
+rsi_oversold: 32
+rsi_overbought: 70
+
+# ADX / Regime filter — second strongest edge
+adx_period: 14
+adx_threshold: 22.0
+use_regime_filter: true
+
+# Signal parameters — time-based exit (24h for longs at 5m candles)
+reversion_target: 0.9
+max_holding_bars: 288
+
+# Risk parameters — no stop, conservative sizing (long side)
+risk_per_trade: 0.02
+max_position_pct: 0.25
+stop_atr_multiplier: 0
+
+# Asymmetric short parameters — stricter entry, smaller size, shorter hold
+short_bb_std_dev: 3.0
+short_rsi_threshold: 80
+short_max_holding_bars: 48
+short_position_pct: 0.10
+
+# Trend filter — shorts only in bearish/neutral regimes
+use_trend_filter: true
+trend_ema_period: 50
+
+# Configurable toggles — simplified (research showed near-zero impact)
+use_squeeze_filter: false
+use_band_walking_exit: false

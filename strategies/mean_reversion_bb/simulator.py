@@ -376,6 +376,31 @@ class DirectionalSimulator:
             dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di)
             adx_val = dx.ewm(alpha=alpha, min_periods=self.model.adx_period, adjust=False).mean()
 
+        # Asymmetric short upper band (wider BB for short entries)
+        bb_std = c_series.rolling(self.model.bb_period).std()
+        short_upper_outer = middle + self.model.short_bb_std_dev * bb_std
+
+        # Trend filter (EMA slope for directional gating)
+        trend_allows_long_arr = np.ones(len(df), dtype=bool)
+        trend_allows_short_arr = np.ones(len(df), dtype=bool)
+        if self.model.use_trend_filter:
+            trend_ema = c_series.ewm(span=self.model.trend_ema_period, adjust=False).mean()
+            trend_ema_arr = trend_ema.values
+            close_vals = c_series.values
+            for ti in range(len(df)):
+                lookback = min(10, ti)
+                if lookback > 0 and not np.isnan(trend_ema_arr[ti]):
+                    slope = (trend_ema_arr[ti] - trend_ema_arr[ti - lookback]) / lookback
+                    price_above = close_vals[ti] > trend_ema_arr[ti]
+                    price_below = close_vals[ti] < trend_ema_arr[ti]
+                    if price_above and slope > 0:
+                        # Bullish: longs OK, shorts blocked
+                        trend_allows_short_arr[ti] = False
+                    elif price_below and slope < 0:
+                        # Bearish: shorts OK, longs blocked
+                        trend_allows_long_arr[ti] = False
+                    # Neutral: both OK (defaults)
+
         # Squeeze detection (vectorized)
         kc_middle = c_series.ewm(span=self.model.kc_period, adjust=False).mean()
         prev_c_kc = c_series.shift(1)
@@ -417,17 +442,21 @@ class DirectionalSimulator:
         squeeze_arr = squeeze_mask.values
         atr_arr = atr_14.values
         adx_arr = adx_val.values if len(adx_val) > 0 else np.full(len(df), 0.0)
+        suo_arr = short_upper_outer.values
         timestamps = df.index
 
         # Use model instance params (configurable per-run)
         RSI_OVERSOLD = self.model.rsi_oversold
         RSI_OVERBOUGHT = self.model.rsi_overbought
+        SHORT_RSI_THRESHOLD = self.model.short_rsi_threshold
         VWAP_CONFIRMATION_PCT = self.model.vwap_confirmation_pct
         REVERSION_TARGET = self.model.reversion_target
         STOP_ATR_MULTIPLIER = self.model.stop_atr_multiplier
         RISK_PER_TRADE = self.model.risk_per_trade
         MAX_POSITION_PCT = self.model.max_position_pct
+        SHORT_POSITION_PCT = self.model.short_position_pct
         MAX_HOLDING_BARS = self.model.max_holding_bars
+        SHORT_MAX_HOLDING_BARS = self.model.short_max_holding_bars
 
         # Position state
         pos_side: Optional[str] = None
@@ -497,7 +526,8 @@ class DirectionalSimulator:
                 # Risk management
                 if pos_side is not None and not exit_done:
                     bars_held += 1
-                    if bars_held >= MAX_HOLDING_BARS:
+                    eff_max_bars = SHORT_MAX_HOLDING_BARS if pos_side == "short" else MAX_HOLDING_BARS
+                    if bars_held >= eff_max_bars:
                         slippage = self.rng.uniform(0, self.slippage_pct) * c
                         if pos_side == "long":
                             exit_p = c - slippage
@@ -547,12 +577,15 @@ class DirectionalSimulator:
 
                 signal = None
                 squeeze_blocks = sq and self.model.use_squeeze_filter
+                suo_v = suo_arr[i] if not np.isnan(suo_arr[i]) else uo_v
+                t_long = trend_allows_long_arr[i]
+                t_short = trend_allows_short_arr[i]
                 if (not np.isnan(uo_v) and not np.isnan(lo_v) and not np.isnan(mid_v)):
                     if (c <= lo_v and rsi_v < RSI_OVERSOLD and vd < VWAP_CONFIRMATION_PCT
-                            and not squeeze_blocks and regime_ok):
+                            and not squeeze_blocks and regime_ok and t_long):
                         signal = "long"
-                    elif (c >= uo_v and rsi_v > RSI_OVERBOUGHT and vd < VWAP_CONFIRMATION_PCT
-                            and not squeeze_blocks and regime_ok):
+                    elif (c >= suo_v and rsi_v > SHORT_RSI_THRESHOLD and vd < VWAP_CONFIRMATION_PCT
+                            and not squeeze_blocks and regime_ok and t_short):
                         signal = "short"
 
                 # Side filter
@@ -578,13 +611,14 @@ class DirectionalSimulator:
                         ptgt = ui_arr[i] if not np.isnan(ui_arr[i]) else (c + mid_v) / 2
 
                     equity_now = cash  # simplified for flat position
+                    eff_pos_pct = SHORT_POSITION_PCT if signal == "short" else MAX_POSITION_PCT
                     if stop_loss == 0.0:
-                        p_size = MAX_POSITION_PCT * equity_now / c
+                        p_size = eff_pos_pct * equity_now / c
                     else:
                         stop_dist = abs(c - stop_loss)
                         if stop_dist > 0:
                             risk_size = RISK_PER_TRADE * equity_now / stop_dist
-                            max_size = MAX_POSITION_PCT * equity_now / c
+                            max_size = eff_pos_pct * equity_now / c
                             p_size = min(risk_size, max_size)
                         else:
                             p_size = 0.0

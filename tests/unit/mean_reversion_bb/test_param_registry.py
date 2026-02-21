@@ -80,8 +80,8 @@ class TestParamRegistry:
         return ParamRegistry()
 
     def test_all_params_registered(self, registry):
-        """All 22 tunable parameters from config.py are registered."""
-        assert len(registry.params) == 22
+        """All 28 tunable parameters from config.py are registered."""
+        assert len(registry.params) == 28
 
     def test_expected_param_names(self, registry):
         expected = {
@@ -92,6 +92,9 @@ class TestParamRegistry:
             "rsi_period", "rsi_oversold", "rsi_overbought",
             "reversion_target", "max_holding_bars",
             "risk_per_trade", "max_position_pct", "stop_atr_multiplier",
+            "short_bb_std_dev", "short_rsi_threshold",
+            "short_max_holding_bars", "short_position_pct",
+            "use_trend_filter", "trend_ema_period",
             "side_filter", "use_squeeze_filter", "use_band_walking_exit",
         }
         assert set(registry.params.keys()) == expected
@@ -121,6 +124,12 @@ class TestParamRegistry:
         assert defaults["side_filter"] == config.SIDE_FILTER
         assert defaults["use_squeeze_filter"] == config.USE_SQUEEZE_FILTER
         assert defaults["use_band_walking_exit"] == config.USE_BAND_WALKING_EXIT
+        assert defaults["short_bb_std_dev"] == config.SHORT_BB_STD_DEV
+        assert defaults["short_rsi_threshold"] == config.SHORT_RSI_THRESHOLD
+        assert defaults["short_max_holding_bars"] == config.SHORT_MAX_HOLDING_BARS
+        assert defaults["short_position_pct"] == config.SHORT_POSITION_PCT
+        assert defaults["use_trend_filter"] == config.USE_TREND_FILTER
+        assert defaults["trend_ema_period"] == config.TREND_EMA_PERIOD
 
     def test_validation_rejects_out_of_range(self, registry):
         """Validation rejects values outside defined ranges."""

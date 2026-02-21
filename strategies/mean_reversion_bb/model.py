@@ -72,12 +72,22 @@ from strategies.mean_reversion_bb.config import (
     RISK_PER_TRADE,
     MAX_POSITION_PCT,
     STOP_ATR_MULTIPLIER,
+    STOP_DECAY_PHASE_1,
+    STOP_DECAY_PHASE_2,
+    STOP_DECAY_MULT_1,
+    STOP_DECAY_MULT_2,
     ADX_PERIOD,
     ADX_THRESHOLD,
     USE_REGIME_FILTER,
     SIDE_FILTER,
     USE_SQUEEZE_FILTER,
     USE_BAND_WALKING_EXIT,
+    SHORT_BB_STD_DEV,
+    SHORT_RSI_THRESHOLD,
+    SHORT_MAX_HOLDING_BARS,
+    SHORT_POSITION_PCT,
+    USE_TREND_FILTER,
+    TREND_EMA_PERIOD,
 )
 
 
@@ -114,6 +124,10 @@ class MeanReversionBB(DirectionalModel):
         rsi_overbought: float = RSI_OVERBOUGHT,
         vwap_confirmation_pct: float = VWAP_CONFIRMATION_PCT,
         stop_atr_multiplier: float = STOP_ATR_MULTIPLIER,
+        stop_decay_phase_1: float = STOP_DECAY_PHASE_1,
+        stop_decay_phase_2: float = STOP_DECAY_PHASE_2,
+        stop_decay_mult_1: float = STOP_DECAY_MULT_1,
+        stop_decay_mult_2: float = STOP_DECAY_MULT_2,
         reversion_target: float = REVERSION_TARGET,
         max_holding_bars: int = MAX_HOLDING_BARS,
         risk_per_trade: float = RISK_PER_TRADE,
@@ -121,6 +135,12 @@ class MeanReversionBB(DirectionalModel):
         side_filter: str = SIDE_FILTER,
         use_squeeze_filter: bool = USE_SQUEEZE_FILTER,
         use_band_walking_exit: bool = USE_BAND_WALKING_EXIT,
+        short_bb_std_dev: float = SHORT_BB_STD_DEV,
+        short_rsi_threshold: float = SHORT_RSI_THRESHOLD,
+        short_max_holding_bars: int = SHORT_MAX_HOLDING_BARS,
+        short_position_pct: float = SHORT_POSITION_PCT,
+        use_trend_filter: bool = USE_TREND_FILTER,
+        trend_ema_period: int = TREND_EMA_PERIOD,
     ):
         self.bb_period = bb_period
         self.bb_std_dev = bb_std_dev
@@ -136,6 +156,10 @@ class MeanReversionBB(DirectionalModel):
         self.rsi_overbought = rsi_overbought
         self.vwap_confirmation_pct = vwap_confirmation_pct
         self.stop_atr_multiplier = stop_atr_multiplier
+        self.stop_decay_phase_1 = stop_decay_phase_1
+        self.stop_decay_phase_2 = stop_decay_phase_2
+        self.stop_decay_mult_1 = stop_decay_mult_1
+        self.stop_decay_mult_2 = stop_decay_mult_2
         self.reversion_target = reversion_target
         self.max_holding_bars = max_holding_bars
         self.risk_per_trade = risk_per_trade
@@ -143,11 +167,18 @@ class MeanReversionBB(DirectionalModel):
         self.side_filter = side_filter
         self.use_squeeze_filter = use_squeeze_filter
         self.use_band_walking_exit = use_band_walking_exit
+        self.short_bb_std_dev = short_bb_std_dev
+        self.short_rsi_threshold = short_rsi_threshold
+        self.short_max_holding_bars = short_max_holding_bars
+        self.short_position_pct = short_position_pct
+        self.use_trend_filter = use_trend_filter
+        self.trend_ema_period = trend_ema_period
 
         # State
         self.squeeze_count: int = 0
         self.position_side: Optional[str] = None
         self.entry_price: Optional[float] = None
+        self.entry_band_level: Optional[float] = None
         self.bars_held: int = 0
 
     def calculate_bollinger_bands(
@@ -350,6 +381,79 @@ class MeanReversionBB(DirectionalModel):
 
         return (last_adx, last_plus, last_minus)
 
+    def calculate_trend_direction(self, close: pd.Series) -> str:
+        """Detect trend direction using EMA slope.
+
+        Compares price vs EMA and EMA slope to classify the regime:
+        - "bullish": price > EMA and EMA rising (longs favored)
+        - "bearish": price < EMA and EMA falling (shorts allowed)
+        - "neutral": mixed signals (both sides allowed)
+
+        Args:
+            close: Close price series
+
+        Returns:
+            One of "bullish", "bearish", "neutral"
+        """
+        if len(close) < self.trend_ema_period:
+            return "neutral"
+
+        ema = close.ewm(span=self.trend_ema_period, adjust=False).mean()
+        last_price = float(close.iloc[-1])
+        last_ema = float(ema.iloc[-1])
+
+        # EMA slope: compare current vs 10 bars ago
+        lookback = min(10, len(ema) - 1)
+        prev_ema = float(ema.iloc[-1 - lookback])
+        ema_slope = (last_ema - prev_ema) / lookback if lookback > 0 else 0.0
+
+        if last_price > last_ema and ema_slope > 0:
+            return "bullish"
+        elif last_price < last_ema and ema_slope < 0:
+            return "bearish"
+        else:
+            return "neutral"
+
+    def compute_time_decay_stop(
+        self,
+        bars_held: int,
+        max_bars: int,
+        band_ref: float,
+        atr: float,
+        side: str,
+    ) -> float:
+        """Compute time-decayed stop price.
+
+        The stop starts at stop_atr_multiplier beyond band reference,
+        then tightens at decay phase boundaries:
+        - Phase 0: stop_atr_multiplier (3.0x) until decay_phase_1 * max_bars
+        - Phase 1: stop_decay_mult_1 (2.0x) until decay_phase_2 * max_bars
+        - Phase 2: stop_decay_mult_2 (1.0x) after decay_phase_2 * max_bars
+
+        Args:
+            bars_held: Number of bars in current trade
+            max_bars: Maximum holding bars for this side
+            band_ref: Band level at entry (lower for long, upper for short)
+            atr: Current ATR value
+            side: 'long' or 'short'
+
+        Returns:
+            Absolute stop price
+        """
+        progress = bars_held / max_bars if max_bars > 0 else 0.0
+
+        if progress >= self.stop_decay_phase_2:
+            mult = self.stop_decay_mult_2
+        elif progress >= self.stop_decay_phase_1:
+            mult = self.stop_decay_mult_1
+        else:
+            mult = self.stop_atr_multiplier
+
+        if side == "long":
+            return band_ref - mult * atr
+        else:
+            return band_ref + mult * atr
+
     def calculate_signals(
         self,
         high: pd.Series,
@@ -400,6 +504,22 @@ class MeanReversionBB(DirectionalModel):
         adx_value, plus_di, minus_di = self.calculate_adx(high, low, close)
         is_ranging = adx_value < self.adx_threshold
 
+        # Asymmetric short band: wider upper band for short entries
+        std = close.rolling(self.bb_period).std()
+        if MA_TYPE == "ema":
+            _middle = close.ewm(span=self.bb_period, adjust=False).mean()
+        elif MA_TYPE == "wma":
+            weights = np.arange(1, self.bb_period + 1, dtype=float)
+            _middle = close.rolling(self.bb_period).apply(
+                lambda x: np.dot(x, weights) / weights.sum(), raw=True
+            )
+        else:
+            _middle = middle  # reuse already-computed SMA
+        short_upper_outer = _middle + self.short_bb_std_dev * std
+
+        # Trend direction for trend filter
+        trend_direction = self.calculate_trend_direction(close)
+
         # Get last values
         last_close = close.iloc[-1]
         last_rsi = float(rsi.iloc[-1]) if not pd.isna(rsi.iloc[-1]) else 50.0
@@ -409,6 +529,7 @@ class MeanReversionBB(DirectionalModel):
         last_middle = float(middle.iloc[-1]) if not pd.isna(middle.iloc[-1]) else last_close
         last_upper_inner = float(upper_inner.iloc[-1]) if not pd.isna(upper_inner.iloc[-1]) else last_close
         last_lower_inner = float(lower_inner.iloc[-1]) if not pd.isna(lower_inner.iloc[-1]) else last_close
+        last_short_upper = float(short_upper_outer.iloc[-1]) if not pd.isna(short_upper_outer.iloc[-1]) else last_close
 
         # %B: position within bands
         band_width = last_upper_outer - last_lower_outer
@@ -441,6 +562,16 @@ class MeanReversionBB(DirectionalModel):
         # Squeeze gate: if squeeze filter is disabled, ignore squeeze state
         squeeze_blocks = is_squeeze and self.use_squeeze_filter
 
+        # Trend filter: gate signals by trend direction
+        trend_allows_long = (
+            trend_direction in ("bullish", "neutral")
+            or not self.use_trend_filter
+        )
+        trend_allows_short = (
+            trend_direction in ("bearish", "neutral")
+            or not self.use_trend_filter
+        )
+
         # Long condition
         if (
             last_close <= last_lower_outer
@@ -448,16 +579,18 @@ class MeanReversionBB(DirectionalModel):
             and vwap_deviation < self.vwap_confirmation_pct
             and not squeeze_blocks
             and regime_ok
+            and trend_allows_long
         ):
             signal = "long"
 
-        # Short condition
+        # Short condition — uses asymmetric thresholds
         elif (
-            last_close >= last_upper_outer
-            and last_rsi > self.rsi_overbought
+            last_close >= last_short_upper
+            and last_rsi > self.short_rsi_threshold
             and vwap_deviation < self.vwap_confirmation_pct
             and not squeeze_blocks
             and regime_ok
+            and trend_allows_short
         ):
             signal = "short"
 
@@ -477,11 +610,13 @@ class MeanReversionBB(DirectionalModel):
             "bandwidth_percentile": bandwidth_percentile,
             "adx": adx_value,
             "is_ranging": is_ranging,
+            "trend_direction": trend_direction,
             "middle": last_middle,
             "upper_outer": last_upper_outer,
             "lower_outer": last_lower_outer,
             "upper_inner": last_upper_inner,
             "lower_inner": last_lower_inner,
+            "short_upper_outer": last_short_upper,
         }
 
     def generate_orders(
@@ -508,20 +643,21 @@ class MeanReversionBB(DirectionalModel):
 
         side = signal["signal"]
 
+        # Select position cap based on side (asymmetric for shorts)
+        effective_position_pct = (
+            self.short_position_pct if side == "short" else self.max_position_pct
+        )
+
         if side == "long":
-            if self.stop_atr_multiplier == 0:
-                stop_loss = 0.0
-            else:
-                stop_loss = signal.get("lower_outer", current_price) - self.stop_atr_multiplier * atr
+            band_ref = signal.get("lower_outer", current_price)
+            stop_loss = band_ref - self.stop_atr_multiplier * atr
             target = current_price + self.reversion_target * (signal["middle"] - current_price)
             partial_target = signal.get(
                 "lower_inner", (current_price + signal["middle"]) / 2
             )
         elif side == "short":
-            if self.stop_atr_multiplier == 0:
-                stop_loss = 0.0
-            else:
-                stop_loss = signal.get("upper_outer", current_price) + self.stop_atr_multiplier * atr
+            band_ref = signal.get("upper_outer", current_price)
+            stop_loss = band_ref + self.stop_atr_multiplier * atr
             target = current_price - self.reversion_target * (current_price - signal["middle"])
             partial_target = signal.get(
                 "upper_inner", (current_price + signal["middle"]) / 2
@@ -529,17 +665,14 @@ class MeanReversionBB(DirectionalModel):
         else:
             return []
 
-        # When stop is disabled (0), size by max position; otherwise risk-based
-        if stop_loss == 0.0:
-            position_size = self.max_position_pct * equity / current_price
+        # Risk-based position sizing (stops are always enforced)
+        stop_distance = abs(current_price - stop_loss)
+        if stop_distance > 0:
+            risk_size = self.risk_per_trade * equity / stop_distance
+            max_size = effective_position_pct * equity / current_price
+            position_size = min(risk_size, max_size)
         else:
-            stop_distance = abs(current_price - stop_loss)
-            if stop_distance > 0:
-                risk_size = self.risk_per_trade * equity / stop_distance
-                max_size = self.max_position_pct * equity / current_price
-                position_size = min(risk_size, max_size)
-            else:
-                position_size = 0.0
+            position_size = 0.0
 
         if position_size <= 0:
             return []
@@ -552,6 +685,7 @@ class MeanReversionBB(DirectionalModel):
                 "target": target,
                 "partial_target": partial_target,
                 "position_size": position_size,
+                "band_ref": band_ref,
             }
         ]
 
@@ -560,31 +694,41 @@ class MeanReversionBB(DirectionalModel):
         current_price: float,
         close: pd.Series,
         volume: pd.Series,
+        *,
+        atr: Optional[float] = None,
     ) -> dict:
         """
         Manage risk for active mean reversion position.
 
         Checks:
-            - Price walking the band (trend, not reversion)
             - Maximum holding period exceeded
-            - Volume spike (potential breakout)
             - Squeeze formation while in position
+            - Price walking the band (trend, not reversion)
+            - Volume spike (potential breakout)
+            - Time-decay stop tightening (always when entry_band_level set)
 
         Args:
             current_price: Current market price
             close: Recent close prices
             volume: Recent volume
+            atr: Current ATR value (optional; approximated from close if absent)
 
         Returns:
-            Risk action dictionary
+            Risk action dictionary. When action is "tighten_stop", the dict
+            includes a "new_stop" key with the computed stop price.
         """
         if self.position_side is None:
             return {"action": "hold", "reason": "no position"}
 
         self.bars_held += 1
 
-        # Max holding period
-        if self.bars_held >= self.max_holding_bars:
+        # Max holding period (asymmetric for shorts)
+        effective_max_bars = (
+            self.short_max_holding_bars
+            if self.position_side == "short"
+            else self.max_holding_bars
+        )
+        if self.bars_held >= effective_max_bars:
             return {"action": "exit", "reason": "max holding period exceeded"}
 
         # Squeeze while in position
@@ -606,11 +750,34 @@ class MeanReversionBB(DirectionalModel):
                 if walking:
                     return {"action": "exit", "reason": "band walking detected"}
 
-        # Volume spike: current volume > 2x 20-period average
+        # Detect volume spike
+        volume_spike = False
         if len(volume) >= 20:
             vol_mean = volume.rolling(20).mean().iloc[-1]
             if vol_mean > 0 and volume.iloc[-1] > 2 * vol_mean:
-                return {"action": "tighten_stop", "reason": "volume spike detected"}
+                volume_spike = True
+
+        # Time-decay stop tightening
+        if self.entry_band_level is not None:
+            # Approximate ATR from close if not provided
+            if atr is None and len(close) >= 15:
+                atr = float(close.diff().abs().rolling(14).mean().iloc[-1])
+
+            if atr is not None and atr > 0:
+                new_stop = self.compute_time_decay_stop(
+                    self.bars_held, effective_max_bars,
+                    self.entry_band_level, atr, self.position_side,
+                )
+                reason = "volume spike + time decay" if volume_spike else "time decay"
+                return {
+                    "action": "tighten_stop",
+                    "reason": reason,
+                    "new_stop": new_stop,
+                }
+
+        # Volume spike without decay info (backward compat)
+        if volume_spike:
+            return {"action": "tighten_stop", "reason": "volume spike detected"}
 
         return {"action": "hold", "reason": "no risk trigger"}
 
@@ -620,9 +787,20 @@ class MeanReversionBB(DirectionalModel):
             "squeeze_count": self.squeeze_count,
             "position_side": self.position_side,
             "entry_price": self.entry_price,
+            "entry_band_level": self.entry_band_level,
             "bars_held": self.bars_held,
             "risk_per_trade": self.risk_per_trade,
             "reversion_target": self.reversion_target,
+            "stop_atr_multiplier": self.stop_atr_multiplier,
+            "stop_decay_phase_1": self.stop_decay_phase_1,
+            "stop_decay_phase_2": self.stop_decay_phase_2,
+            "stop_decay_mult_1": self.stop_decay_mult_1,
+            "stop_decay_mult_2": self.stop_decay_mult_2,
             "adx_threshold": self.adx_threshold,
             "use_regime_filter": self.use_regime_filter,
+            "use_trend_filter": self.use_trend_filter,
+            "short_bb_std_dev": self.short_bb_std_dev,
+            "short_rsi_threshold": self.short_rsi_threshold,
+            "short_max_holding_bars": self.short_max_holding_bars,
+            "short_position_pct": self.short_position_pct,
         }
