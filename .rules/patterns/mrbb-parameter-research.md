@@ -1,6 +1,8 @@
 # MRBB Parameter Research — Literature Findings
 
 > Evidence-based parameter recommendations for Bollinger Band mean reversion on crypto.
+>
+> **Status: SHELVED** -- Strategy failed validation (Feb 2026). See `mrbb-validation-results.md` for full evidence.
 
 ## Sources
 

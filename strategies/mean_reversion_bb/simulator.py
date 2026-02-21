@@ -38,10 +38,12 @@ class DirectionalSimulator:
         initial_equity: float = 10_000.0,
         slippage_pct: float = DEFAULT_SLIPPAGE_PCT,
         random_seed: Optional[int] = None,
+        taker_fee: float = 0.0,
     ):
         self.model = model
         self.initial_equity = initial_equity
         self.slippage_pct = slippage_pct
+        self.taker_fee = taker_fee
         self.rng = random.Random(random_seed)
 
         # Position state
@@ -216,10 +218,13 @@ class DirectionalSimulator:
         self.model.entry_band_level = order.get("band_ref")
 
         # Adjust cash for position entry
+        position_value = self.position_size * actual_price
         if self.position_side == "long":
-            self.cash -= self.position_size * actual_price
+            self.cash -= position_value
         else:
-            self.cash += self.position_size * actual_price
+            self.cash += position_value
+        # Deduct taker fee on entry
+        self.cash -= position_value * self.taker_fee
 
     def _check_position_exits(self, high: float, low: float) -> Optional[str]:
         """Check if stop or target is hit within the candle's range."""
@@ -256,10 +261,13 @@ class DirectionalSimulator:
     def _partial_exit(self, exit_price: float) -> None:
         """Exit half the position at the partial target."""
         half = self.position_size / 2
+        partial_value = half * exit_price
         if self.position_side == "long":
-            self.cash += half * exit_price
+            self.cash += partial_value
         else:
-            self.cash -= half * exit_price
+            self.cash -= partial_value
+        # Deduct taker fee on partial exit
+        self.cash -= partial_value * self.taker_fee
         self.position_size -= half
         self.partial_exited = True
 
@@ -282,10 +290,13 @@ class DirectionalSimulator:
             "reason": reason,
         })
 
+        exit_value = self.position_size * actual_exit
         if self.position_side == "long":
-            self.cash += self.position_size * actual_exit
+            self.cash += exit_value
         else:
-            self.cash -= self.position_size * actual_exit
+            self.cash -= exit_value
+        # Deduct taker fee on exit
+        self.cash -= exit_value * self.taker_fee
         self.position_side = None
         self.position_size = 0.0
         self.entry_price = 0.0
@@ -479,6 +490,7 @@ class DirectionalSimulator:
         bars_held = 0
         band_ref = 0.0
         cash = self.initial_equity
+        taker_fee = self.taker_fee
         equity_curve: List[Dict] = []
         trade_log: List[Dict] = []
 
@@ -498,6 +510,7 @@ class DirectionalSimulator:
                         pnl = pos_size * (exit_p - entry_price)
                         trade_log.append({"side": "long", "entry_price": entry_price, "exit_price": exit_p, "size": pos_size, "pnl": pnl, "reason": "stop_loss", "bars_held": bars_held})
                         cash += pos_size * exit_p
+                        cash -= pos_size * exit_p * taker_fee
                         pos_side = None; exit_done = True
                     elif h >= target:
                         slippage = self.rng.uniform(0, self.slippage_pct) * target
@@ -505,11 +518,13 @@ class DirectionalSimulator:
                         pnl = pos_size * (exit_p - entry_price)
                         trade_log.append({"side": "long", "entry_price": entry_price, "exit_price": exit_p, "size": pos_size, "pnl": pnl, "reason": "target", "bars_held": bars_held})
                         cash += pos_size * exit_p
+                        cash -= pos_size * exit_p * taker_fee
                         pos_side = None; exit_done = True
                     elif not partial_exited and h >= partial_target:
                         half = pos_size / 2
                         pnl_half = half * (partial_target - entry_price)
                         cash += half * partial_target
+                        cash -= half * partial_target * taker_fee
                         pos_size -= half
                         partial_exited = True
                 elif pos_side == "short":
@@ -519,6 +534,7 @@ class DirectionalSimulator:
                         pnl = pos_size * (entry_price - exit_p)
                         trade_log.append({"side": "short", "entry_price": entry_price, "exit_price": exit_p, "size": pos_size, "pnl": pnl, "reason": "stop_loss", "bars_held": bars_held})
                         cash -= pos_size * exit_p
+                        cash -= pos_size * exit_p * taker_fee
                         pos_side = None; exit_done = True
                     elif lo <= target:
                         slippage = self.rng.uniform(0, self.slippage_pct) * target
@@ -526,11 +542,13 @@ class DirectionalSimulator:
                         pnl = pos_size * (entry_price - exit_p)
                         trade_log.append({"side": "short", "entry_price": entry_price, "exit_price": exit_p, "size": pos_size, "pnl": pnl, "reason": "target", "bars_held": bars_held})
                         cash -= pos_size * exit_p
+                        cash -= pos_size * exit_p * taker_fee
                         pos_side = None; exit_done = True
                     elif not partial_exited and lo <= partial_target:
                         half = pos_size / 2
                         pnl_half = half * (entry_price - partial_target)
                         cash -= half * partial_target
+                        cash -= half * partial_target * taker_fee
                         pos_size -= half
                         partial_exited = True
 
@@ -571,6 +589,7 @@ class DirectionalSimulator:
                             cash += pos_size * exit_p
                         else:
                             cash -= pos_size * exit_p
+                        cash -= pos_size * exit_p * taker_fee
                         pos_side = None
 
                     # Band walking: 3+ candles at outer band
@@ -592,6 +611,7 @@ class DirectionalSimulator:
                                 cash += pos_size * exit_p
                             else:
                                 cash -= pos_size * exit_p
+                            cash -= pos_size * exit_p * taker_fee
                             pos_side = None
 
             # 2. Signal generation if flat
@@ -656,10 +676,12 @@ class DirectionalSimulator:
                         partial_exited = False
                         bars_held = 0
                         band_ref = lo_v if signal == "long" else uo_v
+                        entry_value = p_size * entry_p
                         if signal == "long":
-                            cash -= p_size * entry_p
+                            cash -= entry_value
                         else:
-                            cash += p_size * entry_p
+                            cash += entry_value
+                        cash -= entry_value * taker_fee
 
             # 3. Equity
             if pos_side == "long":
@@ -685,6 +707,7 @@ class DirectionalSimulator:
                 cash += pos_size * exit_p
             else:
                 cash -= pos_size * exit_p
+            cash -= pos_size * exit_p * taker_fee
 
         final_equity = equity_curve[-1]["equity"] if equity_curve else self.initial_equity
 

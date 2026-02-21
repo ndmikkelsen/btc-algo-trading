@@ -1,38 +1,61 @@
-# Roadmap: Time-Decay Stop Loss
+# Roadmap: MRBB Profitability — Validate Edge, Optimize Stops, Deploy
 
-## Phase 1: Config + Model Core (btc-algo-trading-97n)
-- Add 4 new config constants (STOP_DECAY_PHASE_1/2, STOP_DECAY_MULT_1/2)
-- Change STOP_ATR_MULTIPLIER default: 2.5 -> 3.0
-- Add 4 new model constructor params + entry_band_level state
-- Add compute_time_decay_stop() method
-- Remove stop_atr_multiplier==0 bypass in generate_orders()
-- Update manage_risk() with time-decay tighten_stop logic
-- Update get_strategy_info()
+## Phase 1: Discovery (parallel — no dependencies)
 
-## Phase 2: Simulator + Live Trader (btc-algo-trading-lob, btc-algo-trading-g0l)
-**Parallelizable** - both depend on Phase 1, independent of each other.
+### 1a: Wide Stop Sweep (btc-algo-trading-2v5)
+- Extend sweep_stop_decay.py to test 3.5x, 4.0x, 4.5x, 5.0x, 5.5x, 6.0x initial ATR multipliers
+- For each: no decay, gentle decay (80% of initial), moderate decay (60%)
+- Record Sharpe, return, MaxDD, worst trade, win rate, avg bars held, stop exit %
+- Analyze the Sharpe/MaxDD efficient frontier
+- Identify optimal initial ATR multiplier
 
-### 2a: Simulator (lob)
-- Step path: track band_ref, remove stop==0 guards, add time-decay per bar
-- Fast path: add band_ref, remove stop==0 guards, inline time-decay, set band_ref at entry
+### 1b: Fee Impact Analysis (btc-algo-trading-8sc)
+- Audit simulator fee model (is slippage_pct the only fee proxy?)
+- Calculate explicit fee drag per configuration
+- Produce gross vs net comparison table
+- If fees aren't properly modeled, add explicit maker/taker fees
 
-### 2b: Live Trader (g0l)
-- Fix _check_stop_target() missing stop_price>0 guard
-- Add band_ref to Position dataclass
-- Store band_ref at entry
-- Pass atr/band_ref/stop_price to manage_risk()
+### 1c: Regime Analysis (btc-algo-trading-k71)
+- Segment 3-year backtest into quarterly windows
+- Per-window: Sharpe, return, # trades, win rate
+- Overlay with BTC realized vol and trend regime
+- Identify which conditions the strategy profits in
+- Check for "lucky period" clustering
 
-## Phase 3: Presets + Registry (btc-algo-trading-q9d)
-- Update 5 optimized presets with stop_atr_multiplier=3.0 + decay params
-- Add 4 new ParamSpecs to registry
-- Update stop_atr_multiplier range (min 0.0->1.0, default 2.5->3.0)
+## Phase 2: Validation (depends on Phase 1a sweep results)
 
-## Phase 4: Tests (btc-algo-trading-7j1)
-- Remove TestNoStopMode (4 tests)
-- New test_time_decay_stops.py (~9 tests)
-- Update param counts in test_param_registry.py
+### 2a: Statistical Significance (btc-algo-trading-sed)
+- Bootstrap test on trade log: H0 Sharpe = 0
+- Monte Carlo permutation test on PnL series
+- Test both current 3.0x config AND best config from wide stop sweep
+- Calculate p-values and confidence intervals
 
-## Phase 5: Backtest Validation (btc-algo-trading-1qh)
-- Sweep script comparing 5 stop configurations
-- Measure Sharpe, max DD, worst trade, return, win rate
-- Save results to backtests/mrbb/stop_decay_sweep/
+### 2b: Walk-Forward / CPCV (btc-algo-trading-7iy)
+- CPCV on best config from sweep
+- Walk-forward: train 6-month rolling, test next 3 months
+- Compare IS vs OOS Sharpe degradation
+- Overfitting check: OOS Sharpe must be > 50% of IS
+
+## Phase 3: Integration (depends on Phases 1 + 2)
+
+### Update Preset (btc-algo-trading-h9x)
+- Update optimized.yaml with evidence-backed parameters
+- Update 1m and 3m presets with calibrated phases
+- Run full test suite (370+ tests)
+- Document parameter selection rationale
+
+## Phase 4: Paper Trading (depends on Phase 3)
+
+### 30-Day Paper Trade (btc-algo-trading-l7z)
+- Deploy DirectionalTrader with validated preset on Bybit dry-run
+- Monitor: signal generation, stop management, time-decay behavior
+- Compare paper results with backtest expectations
+- Log execution issues
+
+## Phase 5: Deployment Decision (depends on Phase 4)
+
+### Go/No-Go (btc-algo-trading-cf3)
+- Compile all evidence: backtest, significance, WFO, paper trade
+- Calculate net-of-fees expected annual return and max drawdown
+- If GO: deploy $500-1000 on Bybit futures
+- If NO-GO: document findings and archive
