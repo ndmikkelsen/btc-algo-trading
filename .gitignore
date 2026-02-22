@@ -77,6 +77,7 @@ freqtrade/
 
 # Backtest results (can be regenerated)
 backtests/results/
+backtests/mrbb/
 *.json.gz
 
 # Logs

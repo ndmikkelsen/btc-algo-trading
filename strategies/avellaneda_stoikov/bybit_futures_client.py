@@ -35,6 +35,10 @@ class BybitFuturesClient:
         if proxy is None:
             proxy = os.getenv('SOCKS5_PROXY')
 
+        # Use socks5h:// to resolve DNS through the proxy (critical for geo-blocking)
+        if proxy and proxy.startswith('socks5://'):
+            proxy = proxy.replace('socks5://', 'socks5h://', 1)
+
         config = {
             'apiKey': api_key,
             'secret': api_secret,
@@ -49,7 +53,7 @@ class BybitFuturesClient:
                 'http': proxy,
                 'https': proxy,
             }
-            print(f"Using proxy: {proxy}")
+            print(f"Using proxy: ...{proxy[-30:]}")
 
         self.exchange = ccxt.bybit(config)
 
@@ -286,6 +290,10 @@ class DryRunFuturesClient:
         if proxy is None:
             proxy = os.getenv('SOCKS5_PROXY')
 
+        # Use socks5h:// to resolve DNS through the proxy (critical for geo-blocking)
+        if proxy and proxy.startswith('socks5://'):
+            proxy = proxy.replace('socks5://', 'socks5h://', 1)
+
         # Connect to real market data (read-only)
         config = {'options': {'defaultType': 'swap'}}
 
@@ -295,7 +303,7 @@ class DryRunFuturesClient:
                 'http': proxy,
                 'https': proxy,
             }
-            print(f"Using proxy: {proxy}")
+            print(f"Using proxy: ...{proxy[-30:]}")
 
         self.exchange = ccxt.bybit(config)
         try:

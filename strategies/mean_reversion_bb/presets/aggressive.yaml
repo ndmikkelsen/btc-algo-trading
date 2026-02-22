@@ -1,0 +1,51 @@
+# Aggressive MRBB preset — tighter bands, more trades, higher risk
+name: aggressive
+description: >
+  Aggressive settings for higher trade frequency and larger position sizes.
+  Tighter bands (2.0σ) trigger more entries, relaxed ADX filter (20)
+  allows trades in mildly trending conditions, and increased risk per
+  trade (3%) with larger max position (35%) amplifies returns. Full
+  reversion target (1.0) aims for maximum profit per trade.
+regime: all
+
+# Bollinger Band parameters
+bb_period: 20
+bb_std_dev: 2.0
+bb_inner_std_dev: 1.0
+
+# VWAP parameters
+vwap_period: 50
+vwap_confirmation_pct: 0.02
+
+# Keltner Channel / Squeeze parameters
+kc_period: 20
+kc_atr_multiplier: 1.5
+min_squeeze_duration: 6
+
+# RSI parameters
+rsi_period: 14
+rsi_oversold: 30
+rsi_overbought: 70
+
+# ADX / Regime filter
+adx_period: 14
+adx_threshold: 20.0
+use_regime_filter: true
+
+# Signal parameters
+reversion_target: 1.0
+max_holding_bars: 50
+
+# Risk parameters
+risk_per_trade: 0.03
+max_position_pct: 0.35
+stop_atr_multiplier: 3.0
+stop_decay_phase_1: 0.33
+stop_decay_phase_2: 0.66
+stop_decay_mult_1: 2.0
+stop_decay_mult_2: 1.0
+
+# Configurable toggles
+side_filter: both
+use_squeeze_filter: true
+use_band_walking_exit: true
