@@ -1,0 +1,56 @@
+# Long-only MRBB preset — disables shorts for BTC structural uptrend
+name: long_only
+description: >
+  Long-only configuration for BTC's structural uptrend bias. Backtest
+  analysis showed shorts lost $186 vs longs $69, making short-side
+  mean reversion unprofitable in trending crypto markets. Stricter
+  RSI oversold (25) ensures deeper pullbacks before long entry,
+  moderate ADX filter (25), and slightly closer reversion target (0.85).
+  NOTE: Requires model support for side_filter — currently MeanReversionBB
+  does not have a use_shorts parameter. The side_filter metadata flag
+  signals the simulator/trader to skip short signals.
+regime: trending_up
+
+# Side filter (now a model constructor param)
+side_filter: long_only
+
+# Bollinger Band parameters
+bb_period: 20
+bb_std_dev: 2.5
+bb_inner_std_dev: 1.0
+
+# VWAP parameters
+vwap_period: 50
+vwap_confirmation_pct: 0.02
+
+# Keltner Channel / Squeeze parameters
+kc_period: 20
+kc_atr_multiplier: 1.5
+min_squeeze_duration: 6
+
+# RSI parameters
+rsi_period: 14
+rsi_oversold: 25
+rsi_overbought: 70
+
+# ADX / Regime filter
+adx_period: 14
+adx_threshold: 25.0
+use_regime_filter: true
+
+# Signal parameters
+reversion_target: 0.85
+max_holding_bars: 50
+
+# Risk parameters
+risk_per_trade: 0.02
+max_position_pct: 0.25
+stop_atr_multiplier: 3.0
+stop_decay_phase_1: 0.33
+stop_decay_phase_2: 0.66
+stop_decay_mult_1: 2.0
+stop_decay_mult_2: 1.0
+
+# Configurable toggles
+use_squeeze_filter: true
+use_band_walking_exit: true

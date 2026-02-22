@@ -23,6 +23,8 @@ Reusable solutions and workflows:
 - `beads-integration.md` - Issue tracking with Beads
 - `git-workflow.md` - Git branching and commit conventions
 - `knowledge-capture.md` - How to capture and organize knowledge
+- `mrbb-parameter-research.md` - Literature findings for BB mean reversion parameters
+- `mrbb-validation-results.md` - **NO-GO** validation results (Feb 2026) — strategy shelved
 
 ## Usage
 
@@ -76,4 +78,4 @@ Query Cognee for context:
 
 ---
 
-**Last Updated**: 2026-02-09
+**Last Updated**: 2026-02-21
