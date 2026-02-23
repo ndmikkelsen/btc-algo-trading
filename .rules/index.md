@@ -8,6 +8,13 @@ This directory contains technical documentation for AI agents and developers wor
 
 ## Structure
 
+### Reference (`reference/`)
+
+Strategy and tooling catalogs for research and implementation:
+
+- `strategies-catalog.md` - Comprehensive strategy catalog with BTC applicability ratings
+- `libraries-reference.md` - Python libraries organized by function (backtesting, data, ML, etc.)
+
 ### Architecture (`architecture/`)
 
 System design, component relationships, and integration patterns:

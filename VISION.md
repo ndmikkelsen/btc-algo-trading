@@ -101,6 +101,7 @@ Emotions kill returns. Let algorithms execute without interference.
 ## Related Documents
 
 - [CONSTITUTION.md](./CONSTITUTION.md) - Guiding principles
+- [WORKFLOW.md](./WORKFLOW.md) - Strategy development pipeline
 - [PLAN.md](./PLAN.md) - Current milestones
 - [AGENTS.md](./AGENTS.md) - Development guide
 
