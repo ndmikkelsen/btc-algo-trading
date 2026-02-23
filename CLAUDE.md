@@ -11,6 +11,8 @@ CONSTITUTION (who we are)
     ↓
 VISION (where we're going)
     ↓
+WORKFLOW (how we operate)
+    ↓
 .rules/ (what we know)
     ↓
 PLAN (what we're doing)
@@ -21,6 +23,7 @@ PLAN (what we're doing)
 - **[AGENTS.md](./AGENTS.md)** - Complete AI development guide
 - **[CONSTITUTION.md](./CONSTITUTION.md)** - Core values and principles
 - **[VISION.md](./VISION.md)** - Long-term vision
+- **[WORKFLOW.md](./WORKFLOW.md)** - Strategy development pipeline
 - **[PLAN.md](./PLAN.md)** - Working memory (current milestones)
 - **[.rules/index.md](.rules/index.md)** - Technical documentation
 
