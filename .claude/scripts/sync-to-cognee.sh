@@ -14,7 +14,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # Default to remote compute server; --local overrides
-COGNEE_API="${COGNEE_URL:-http://btc-cognee.apps.compute.lan}/api/v1"
+COGNEE_API="${COGNEE_URL:-https://btc-cognee.apps.compute.lan}/api/v1"
 
 # Colors for output
 RED='\033[0;31m'
@@ -29,7 +29,7 @@ log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
 # Get dataset ID by name
 get_dataset_id() {
     local dataset_name="$1"
-    curl -s "$COGNEE_API/datasets" | \
+    curl -sk "$COGNEE_API/datasets" | \
         python3 -c "import sys, json; datasets = json.load(sys.stdin); match = next((d for d in datasets if d['name'] == '$dataset_name'), None); print(match['id'] if match else '')"
 }
 
@@ -45,14 +45,14 @@ delete_dataset() {
     fi
 
     log_info "Deleting dataset: $dataset_name (ID: $dataset_id)"
-    curl -s -X DELETE "$COGNEE_API/datasets/$dataset_id" > /dev/null
+    curl -sk -X DELETE "$COGNEE_API/datasets/$dataset_id" > /dev/null
     log_info "✓ Deleted: $dataset_name"
 }
 
 # Check if Cognee is running
 check_cognee() {
     local base_url="${COGNEE_API%/api/v1}"
-    if ! curl -s -f "${base_url}/health" > /dev/null 2>&1; then
+    if ! curl -sk -f "${base_url}/health" > /dev/null 2>&1; then
         log_error "Cognee is not reachable at ${base_url}"
         if [ "${USE_LOCAL:-false}" = "true" ]; then
             log_error "Start local stack with: .claude/scripts/cognee-local.sh up"
@@ -92,13 +92,13 @@ upload_files() {
         filename=$(basename "$file")
         log_info "  → $filename"
 
-        curl -s -X POST "$COGNEE_API/add" \
+        curl -sk -X POST "$COGNEE_API/add" \
             -F "data=@$file" \
             -F "datasetName=$dataset_name" > /dev/null
     done
 
     log_info "Processing dataset: $dataset_name"
-    curl -s -X POST "$COGNEE_API/cognify" \
+    curl -sk -X POST "$COGNEE_API/cognify" \
         -H "Content-Type: application/json" \
         -d "{\"datasets\": [\"$dataset_name\"]}" > /dev/null
 

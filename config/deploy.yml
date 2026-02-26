@@ -9,18 +9,26 @@ proxy:
   app_port: 8000
   ssl: false
   forward_headers: true
+  healthcheck:
+    path: /health
+    interval: 5
+    timeout: 30
 
 registry:
-  server: registry.harbor.compute.lan
+  server: harbor.compute.lan
   username: admin
   password:
     - KAMAL_REGISTRY_PASSWORD
 
 ssh:
-  user: root
+  user: compute
+  keys:
+    - ~/.ssh/z3r0Layer-main
 
 builder:
-  multiarch: false
+  arch: amd64
+  dockerfile: config/Dockerfile.cognee
+  context: config
 
 env:
   clear:
@@ -37,11 +45,13 @@ env:
     LLM_MODEL: gpt-4o-mini
     EMBEDDING_MODEL: text-embedding-3-small
     EMBEDDING_DIMENSIONS: "1536"
+    GRAPH_DATABASE_PROVIDER: kuzu
     REQUIRE_AUTHENTICATION: "false"
     ENABLE_BACKEND_ACCESS_CONTROL: "false"
   secret:
-    - COGNEE_DB_PASSWORD
-    - OPENAI_API_KEY
+    - DB_PASSWORD
+    - VECTOR_DB_PASSWORD
+    - LLM_API_KEY
 
 volumes:
   - /mnt/nfs/docker/btc-cognee/data:/app/data
@@ -50,7 +60,7 @@ accessories:
   db:
     image: pgvector/pgvector:pg17
     host: 10.10.20.138
-    port: "127.0.0.1:5433:5432"
+    port: "127.0.0.1:5435:5432"
     env:
       clear:
         POSTGRES_USER: cognee

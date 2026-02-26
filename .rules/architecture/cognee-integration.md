@@ -75,7 +75,7 @@ Cognee provides semantic search, knowledge graphs, and AI-powered insights over 
 - REST API (FastAPI)
 - Document ingestion and processing
 - Semantic search
-- Accessible at `http://btc-cognee.apps.compute.lan`
+- Accessible at `https://btc-cognee.apps.compute.lan`
 
 ## Data Flow
 
@@ -106,7 +106,7 @@ Cognee provides semantic search, knowledge graphs, and AI-powered insights over 
 1. User runs: /query "How do I capture patterns?"
    │
 2. Claude calls Cognee API:
-   │  POST http://btc-cognee.apps.compute.lan/api/v1/search
+   │  POST https://btc-cognee.apps.compute.lan/api/v1/search
    │  { "query": "How do I capture patterns?" }
    │
 3. Cognee processes query:
@@ -157,7 +157,7 @@ Cognee provides semantic search, knowledge graphs, and AI-powered insights over 
 
 ## API Endpoints
 
-Base URL: `http://btc-cognee.apps.compute.lan`
+Base URL: `https://btc-cognee.apps.compute.lan`
 
 ### Health Check
 
@@ -201,7 +201,7 @@ Content-Type: application/json
 ### API Docs
 
 ```bash
-open http://btc-cognee.apps.compute.lan/docs
+open https://btc-cognee.apps.compute.lan/docs
 ```
 
 ## Deployment
@@ -332,7 +332,7 @@ For offline work or testing, a local Docker stack is available:
 **Cognee unreachable:**
 ```bash
 # Check health endpoint
-curl http://btc-cognee.apps.compute.lan/health
+curl https://btc-cognee.apps.compute.lan/health
 
 # Check deploy status
 kamal app details -c config/deploy.yml

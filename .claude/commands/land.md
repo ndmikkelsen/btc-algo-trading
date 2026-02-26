@@ -235,7 +235,7 @@ Cognee runs on the compute server at `btc-cognee.apps.compute.lan`.
 Capture session context to Cognee for searchable history:
 
 ```bash
-COGNEE_URL="${COGNEE_URL:-http://btc-cognee.apps.compute.lan}"
+COGNEE_URL="${COGNEE_URL:-https://btc-cognee.apps.compute.lan}"
 
 # Create session note file
 SESSION_FILE="/tmp/session-$(date +%Y%m%d-%H%M%S).txt"
@@ -264,7 +264,7 @@ Related Documentation:
 EOF
 
 # Upload to Cognee (skip if unreachable)
-if curl -s "${COGNEE_URL}/health" > /dev/null 2>&1; then
+if curl -sk "${COGNEE_URL}/health" > /dev/null 2>&1; then
   curl -X POST "${COGNEE_URL}/api/v1/add" \
     -F "data=@$SESSION_FILE" \
     -F "datasetName=btc-sessions"
@@ -286,7 +286,7 @@ fi
 Sync `.claude/` and `.rules/` to Cognee if they changed this session:
 
 ```bash
-COGNEE_URL="${COGNEE_URL:-http://btc-cognee.apps.compute.lan}"
+COGNEE_URL="${COGNEE_URL:-https://btc-cognee.apps.compute.lan}"
 
 # Check if knowledge garden files changed in this session
 GARDEN_CHANGED=$(git diff --name-only origin/dev...HEAD | grep '^\(.claude/\|.rules/\)' || echo "")
@@ -297,7 +297,7 @@ if [ -n "$GARDEN_CHANGED" ] && [ "${COGNEE_REACHABLE:-false}" = true ]; then
 
   # Upload .claude/ files to btc-knowledge-garden dataset
   for file in $(find .claude -type f -name "*.md" | sort); do
-    curl -s -X POST "${COGNEE_URL}/api/v1/add" \
+    curl -sk -X POST "${COGNEE_URL}/api/v1/add" \
       -F "data=@${file}" \
       -F "datasetName=btc-knowledge-garden" > /dev/null
   done
@@ -305,14 +305,14 @@ if [ -n "$GARDEN_CHANGED" ] && [ "${COGNEE_REACHABLE:-false}" = true ]; then
   # Upload .rules/ files to btc-patterns dataset
   if [ -d .rules ]; then
     for file in $(find .rules -type f -name "*.md" | sort); do
-      curl -s -X POST "${COGNEE_URL}/api/v1/add" \
+      curl -sk -X POST "${COGNEE_URL}/api/v1/add" \
         -F "data=@${file}" \
         -F "datasetName=btc-patterns" > /dev/null
     done
   fi
 
   # Cognify both datasets to create knowledge graphs
-  curl -s -X POST "${COGNEE_URL}/api/v1/cognify" \
+  curl -sk -X POST "${COGNEE_URL}/api/v1/cognify" \
     -H "Content-Type: application/json" \
     -d '{"datasets": ["btc-knowledge-garden", "btc-patterns"]}' > /dev/null
 
@@ -329,14 +329,14 @@ if [ -n "$CONSTITUTION_CHANGED" ] && [ "${COGNEE_REACHABLE:-false}" = true ]; th
 
   for file in CONSTITUTION.md VISION.md PLAN.md; do
     if [ -f "$file" ]; then
-      curl -s -X POST "${COGNEE_URL}/api/v1/add" \
+      curl -sk -X POST "${COGNEE_URL}/api/v1/add" \
         -F "data=@${file}" \
         -F "datasetName=btc-constitution" > /dev/null 2>&1
     fi
   done
 
   # Cognify constitution dataset
-  curl -s -X POST "${COGNEE_URL}/api/v1/cognify" \
+  curl -sk -X POST "${COGNEE_URL}/api/v1/cognify" \
     -H "Content-Type: application/json" \
     -d '{"datasets": ["btc-constitution"]}' > /dev/null
 

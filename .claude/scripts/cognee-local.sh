@@ -12,7 +12,7 @@ DOCKER_DIR="$REPO_ROOT/.claude/docker"
 COMPOSE_FILE="$DOCKER_DIR/docker-compose.yml"
 ENV_FILE="$DOCKER_DIR/.env"
 
-REMOTE_URL="http://btc-cognee.apps.compute.lan"
+REMOTE_URL="https://btc-cognee.apps.compute.lan"
 LOCAL_URL="http://localhost:8001"
 
 # Colors
