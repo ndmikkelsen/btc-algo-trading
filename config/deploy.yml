@@ -1,5 +1,5 @@
 service: btc-cognee
-image: cognee/cognee
+image: btc-algo-trading/btc-cognee
 
 servers:
   - 10.10.20.138
