@@ -1,0 +1,61 @@
+service: btc-cognee
+image: cognee/cognee
+
+servers:
+  - 10.10.20.138
+
+proxy:
+  host: btc-cognee.apps.compute.lan
+  app_port: 8000
+  ssl: false
+  forward_headers: true
+
+registry:
+  server: registry.harbor.compute.lan
+  username: admin
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+ssh:
+  user: root
+
+builder:
+  multiarch: false
+
+env:
+  clear:
+    DB_PROVIDER: postgres
+    DB_HOST: btc-cognee-db
+    DB_PORT: "5432"
+    DB_NAME: cognee
+    DB_USERNAME: cognee
+    VECTOR_DB_PROVIDER: pgvector
+    VECTOR_DB_HOST: btc-cognee-db
+    VECTOR_DB_PORT: "5432"
+    VECTOR_DB_NAME: cognee
+    VECTOR_DB_USERNAME: cognee
+    LLM_MODEL: gpt-4o-mini
+    EMBEDDING_MODEL: text-embedding-3-small
+    EMBEDDING_DIMENSIONS: "1536"
+    REQUIRE_AUTHENTICATION: "false"
+    ENABLE_BACKEND_ACCESS_CONTROL: "false"
+  secret:
+    - COGNEE_DB_PASSWORD
+    - OPENAI_API_KEY
+
+volumes:
+  - /mnt/nfs/docker/btc-cognee/data:/app/data
+
+accessories:
+  db:
+    image: pgvector/pgvector:pg17
+    host: 10.10.20.138
+    port: "127.0.0.1:5433:5432"
+    env:
+      clear:
+        POSTGRES_USER: cognee
+        POSTGRES_DB: cognee
+      secret:
+        - POSTGRES_PASSWORD
+    volumes:
+      - /mnt/nfs/docker/btc-cognee/postgres:/var/lib/postgresql/data

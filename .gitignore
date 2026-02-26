@@ -27,6 +27,9 @@ cognee-*.txt
 backups/cognee-*
 .claude/docker/.env
 
+# Kamal secrets (real values — never commit)
+.kamal/secrets
+
 # Land workflow scratchpad
 STICKYNOTE.md
 

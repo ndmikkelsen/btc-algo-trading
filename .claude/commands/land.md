@@ -228,11 +228,15 @@ Write session handoff to `STICKYNOTE.md` (local only, gitignored):
 
 ⚠️ **THIS STEP IS MANDATORY — DO NOT SKIP**
 
+Cognee runs on the compute server at `btc-cognee.apps.compute.lan`.
+
 ### 8a. Capture Session History
 
 Capture session context to Cognee for searchable history:
 
 ```bash
+COGNEE_URL="${COGNEE_URL:-http://btc-cognee.apps.compute.lan}"
+
 # Create session note file
 SESSION_FILE="/tmp/session-$(date +%Y%m%d-%H%M%S).txt"
 cat > "$SESSION_FILE" << 'EOF'
@@ -259,21 +263,21 @@ Related Documentation:
 - [any .rules/ docs that are relevant]
 EOF
 
-# Upload to Cognee (skip if Cognee not running)
-if curl -s http://localhost:8001/health > /dev/null 2>&1; then
-  curl -X POST http://localhost:8001/api/v1/add \
+# Upload to Cognee (skip if unreachable)
+if curl -s "${COGNEE_URL}/health" > /dev/null 2>&1; then
+  curl -X POST "${COGNEE_URL}/api/v1/add" \
     -F "data=@$SESSION_FILE" \
     -F "datasetName=btc-sessions"
 
-  curl -X POST http://localhost:8001/api/v1/cognify \
+  curl -X POST "${COGNEE_URL}/api/v1/cognify" \
     -H "Content-Type: application/json" \
     -d '{"datasets": ["btc-sessions"]}'
 
   echo "✓ Session captured to Cognee"
-  COGNEE_RUNNING=true
+  COGNEE_REACHABLE=true
 else
-  echo "⚠️  Cognee not running, skipping session capture"
-  COGNEE_RUNNING=false
+  echo "⚠️  Cognee not reachable at ${COGNEE_URL}, skipping session capture"
+  COGNEE_REACHABLE=false
 fi
 ```
 
@@ -282,63 +286,63 @@ fi
 Sync `.claude/` and `.rules/` to Cognee if they changed this session:
 
 ```bash
+COGNEE_URL="${COGNEE_URL:-http://btc-cognee.apps.compute.lan}"
+
 # Check if knowledge garden files changed in this session
 GARDEN_CHANGED=$(git diff --name-only origin/dev...HEAD | grep '^\(.claude/\|.rules/\)' || echo "")
 CONSTITUTION_CHANGED=$(git diff --name-only origin/dev...HEAD | grep '^\(CONSTITUTION\|VISION\|PLAN\)\.md$' || echo "")
 
-if [ -n "$GARDEN_CHANGED" ] && [ "$COGNEE_RUNNING" = true ]; then
+if [ -n "$GARDEN_CHANGED" ] && [ "${COGNEE_REACHABLE:-false}" = true ]; then
   echo "📚 Knowledge garden files changed this session, syncing to Cognee..."
 
-  # Upload .claude/ files to knowledge-garden dataset
+  # Upload .claude/ files to btc-knowledge-garden dataset
   for file in $(find .claude -type f -name "*.md" | sort); do
-    curl -s -X POST http://localhost:8001/api/v1/add \
+    curl -s -X POST "${COGNEE_URL}/api/v1/add" \
       -F "data=@${file}" \
-      -F "datasetName=knowledge-garden" > /dev/null
+      -F "datasetName=btc-knowledge-garden" > /dev/null
   done
 
   # Upload .rules/ files to btc-patterns dataset
   if [ -d .rules ]; then
     for file in $(find .rules -type f -name "*.md" | sort); do
-      curl -s -X POST http://localhost:8001/api/v1/add \
+      curl -s -X POST "${COGNEE_URL}/api/v1/add" \
         -F "data=@${file}" \
         -F "datasetName=btc-patterns" > /dev/null
     done
   fi
 
   # Cognify both datasets to create knowledge graphs
-  curl -s -X POST http://localhost:8001/api/v1/cognify \
+  curl -s -X POST "${COGNEE_URL}/api/v1/cognify" \
     -H "Content-Type: application/json" \
-    -d '{"datasets": ["knowledge-garden", "btc-patterns"]}' > /dev/null
+    -d '{"datasets": ["btc-knowledge-garden", "btc-patterns"]}' > /dev/null
 
   echo "✓ Knowledge garden synced to Cognee"
 elif [ -n "$GARDEN_CHANGED" ]; then
-  echo "⚠️  Knowledge garden changed but Cognee not running"
-  echo "   Start Cognee and re-run /land to sync"
+  echo "⚠️  Knowledge garden changed but Cognee not reachable at ${COGNEE_URL}"
 else
   echo "ℹ️  No knowledge garden changes, skipping sync"
 fi
 
 # Sync constitution files if changed
-if [ -n "$CONSTITUTION_CHANGED" ] && [ "$COGNEE_RUNNING" = true ]; then
+if [ -n "$CONSTITUTION_CHANGED" ] && [ "${COGNEE_REACHABLE:-false}" = true ]; then
   echo "📜 Constitution files changed this session, syncing to Cognee..."
 
   for file in CONSTITUTION.md VISION.md PLAN.md; do
     if [ -f "$file" ]; then
-      curl -s -X POST http://localhost:8001/api/v1/add \
+      curl -s -X POST "${COGNEE_URL}/api/v1/add" \
         -F "data=@${file}" \
         -F "datasetName=btc-constitution" > /dev/null 2>&1
     fi
   done
 
   # Cognify constitution dataset
-  curl -s -X POST http://localhost:8001/api/v1/cognify \
+  curl -s -X POST "${COGNEE_URL}/api/v1/cognify" \
     -H "Content-Type: application/json" \
     -d '{"datasets": ["btc-constitution"]}' > /dev/null
 
   echo "✓ Constitution synced to Cognee"
 elif [ -n "$CONSTITUTION_CHANGED" ]; then
-  echo "⚠️  Constitution changed but Cognee not running"
-  echo "   Start Cognee and re-run /land to sync"
+  echo "⚠️  Constitution changed but Cognee not reachable at ${COGNEE_URL}"
 fi
 ```
 

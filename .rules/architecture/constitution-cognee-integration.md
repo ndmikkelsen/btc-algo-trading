@@ -79,13 +79,13 @@ CONSTITUTION_CHANGED=$(git diff --name-only main...HEAD | grep '^\(CONSTITUTION\
 if [ -n "$CONSTITUTION_CHANGED" ]; then
   # Upload to btc-constitution dataset
   for file in CONSTITUTION.md VISION.md PLAN.md; do
-    curl -X POST http://localhost:8001/api/v1/add \
+    curl -X POST http://btc-cognee.apps.compute.lan/api/v1/add \
       -F "data=@${file}" \
       -F "datasetName=btc-constitution"
   done
   
   # Cognify
-  curl -X POST http://localhost:8001/api/v1/cognify \
+  curl -X POST http://btc-cognee.apps.compute.lan/api/v1/cognify \
     -H "Content-Type: application/json" \
     -d '{"datasets": ["btc-constitution"]}'
 fi
@@ -239,7 +239,7 @@ Constitution files sync automatically via `/land`:
 
 ```bash
 # Check if constitution dataset exists
-curl -X GET http://localhost:8001/api/v1/datasets | grep constitution
+curl -X GET http://btc-cognee.apps.compute.lan/api/v1/datasets | grep constitution
 
 # Query constitution directly
 /query --with-values What are our core values?
@@ -248,7 +248,7 @@ curl -X GET http://localhost:8001/api/v1/datasets | grep constitution
 ## Troubleshooting
 
 **Constitution not in search results:**
-- Verify dataset exists: `curl http://localhost:8001/api/v1/datasets`
+- Verify dataset exists: `curl http://btc-cognee.apps.compute.lan/api/v1/datasets`
 - Ensure `/land` was run after constitution changes
 - Check Cognee logs: `docker logs cognee | tail -50`
 

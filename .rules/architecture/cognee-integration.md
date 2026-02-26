@@ -1,12 +1,12 @@
 ---
 description: Cognee AI memory layer integration for BTC algo trading knowledge system
 tags: [cognee, architecture, knowledge-graph, semantic-search, trading]
-last_updated: 2026-01-31
+last_updated: 2026-02-26
 ---
 
 # Cognee Integration Architecture
 
-Cognee provides semantic search, knowledge graphs, and AI-powered insights over the BTC algo trading knowledge system.
+Cognee provides semantic search, knowledge graphs, and AI-powered insights over the BTC algo trading knowledge system. It runs on the compute server as a persistent service.
 
 ## Overview
 
@@ -16,31 +16,29 @@ Cognee provides semantic search, knowledge graphs, and AI-powered insights over 
 │  (.claude/ + .rules/ + Session History)                 │
 └────────────────┬────────────────────────────────────────┘
                  │
-                 │ /land (Step 8b - auto-sync)
+                 │ /land (Step 8 - auto-sync)
                  ▼
 ┌─────────────────────────────────────────────────────────┐
-│                    Cognee Stack                          │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
-│  │  PostgreSQL  │  │    Redis     │  │    Neo4j     │  │
-│  │  + pgvector  │  │   (Cache)    │  │   (Graph)    │  │
-│  └──────────────┘  └──────────────┘  └──────────────┘  │
-│         │                  │                 │          │
-│         └──────────────────┴─────────────────┘          │
-│                           │                             │
-│                  ┌────────▼────────┐                    │
-│                  │  Cognee API     │                    │
-│                  │  (FastAPI)      │                    │
-│                  └────────┬────────┘                    │
-└───────────────────────────┼─────────────────────────────┘
+│           Cognee — Compute Server                        │
+│  btc-cognee.apps.compute.lan                            │
+│                                                          │
+│  ┌─────────────────────────────────────────────────┐    │
+│  │  Cognee API (FastAPI)                           │    │
+│  └──────────────────────┬──────────────────────────┘    │
+│                         │                               │
+│  ┌──────────────────────▼──────────────────────────┐    │
+│  │  PostgreSQL + pgvector (btc-cognee-db)          │    │
+│  │  NFS: /mnt/nfs/docker/btc-cognee/postgres       │    │
+│  └─────────────────────────────────────────────────┘    │
+└───────────────────────────┬─────────────────────────────┘
                             │
-                            │ HTTP API
+                            │ HTTP (LAN)
                             ▼
 ┌─────────────────────────────────────────────────────────┐
 │                      Consumers                           │
 │  • /query command (semantic search)                     │
-│  • /land command (session capture)                      │
+│  • /land command (session capture + auto-sync)          │
 │  • Claude agents (context retrieval)                    │
-│  • Neo4j Browser (graph visualization)                  │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -63,52 +61,43 @@ Cognee provides semantic search, knowledge graphs, and AI-powered insights over 
 - Work completed, decisions made, challenges solved
 - Context for future sessions
 
-### 2. Cognee Stack
+### 2. Cognee Stack (Compute Server)
 
-**PostgreSQL + pgvector**
+**Deployed via Kamal** from `config/deploy.yml`.
+
+**PostgreSQL + pgvector** (`btc-cognee-db` accessory)
 - Document storage and metadata
 - Vector embeddings for semantic search
 - Full-text search capabilities
+- NFS-backed persistence at `/mnt/nfs/docker/btc-cognee/`
 
-**Redis**
-- Response caching
-- Async job queue
-- Session storage
-
-**Neo4j**
-- Knowledge graph database
-- Entity relationships
-- Pattern connections
-- Concept hierarchies
-
-**Cognee API**
+**Cognee API** (`btc-cognee` service)
 - REST API (FastAPI)
 - Document ingestion and processing
 - Semantic search
-- Knowledge graph queries
+- Accessible at `http://btc-cognee.apps.compute.lan`
 
 ## Data Flow
 
 ### Ingestion (Knowledge → Cognee)
 
 ```
-1. User runs: /land (Step 8b auto-syncs when .claude/ or .rules/ changed)
+1. User runs: /land (Step 8 auto-syncs when .claude/ or .rules/ changed)
    │
 2. /land finds all .md files in .claude/ and .rules/
    │
 3. For each file:
    │  ├─ Upload to Cognee API (POST /api/v1/add)
-   │  ├─ Assign to dataset (knowledge-garden or btc-patterns)
+   │  ├─ Assign to dataset (btc-knowledge-garden or btc-patterns)
    │  └─ Store metadata (file path, last modified, etc.)
    │
 4. Cognee processes files:
    │  ├─ Chunk documents (semantic chunking)
    │  ├─ Generate embeddings (OpenAI text-embedding-3-small)
    │  ├─ Extract entities (LLM-based)
-   │  ├─ Build knowledge graph (Neo4j)
    │  └─ Index for search (PostgreSQL + pgvector)
    │
-5. Knowledge graph created and ready for queries
+5. Knowledge indexed and ready for queries
 ```
 
 ### Query (User → Cognee → Answer)
@@ -117,13 +106,12 @@ Cognee provides semantic search, knowledge graphs, and AI-powered insights over 
 1. User runs: /query "How do I capture patterns?"
    │
 2. Claude calls Cognee API:
-   │  POST /api/v1/search
+   │  POST http://btc-cognee.apps.compute.lan/api/v1/search
    │  { "query": "How do I capture patterns?" }
    │
 3. Cognee processes query:
    │  ├─ Generate query embedding
    │  ├─ Vector similarity search (pgvector)
-   │  ├─ Graph traversal (Neo4j) for related concepts
    │  ├─ LLM-based answer generation
    │  └─ Return answer + sources
    │
@@ -165,98 +153,111 @@ Cognee provides semantic search, knowledge graphs, and AI-powered insights over 
 | `btc-constitution` | CONSTITUTION.md, VISION.md, PLAN.md, AGENTS.md | Core values and guidance |
 | `btc-strategies` | `strategies/` | Trading strategy code and docs |
 | `btc-backtests` | `backtests/` | Backtest results and analysis |
+| `btc-sessions` | `/land` session notes | Work history, decisions, solutions |
 
 ## API Endpoints
+
+Base URL: `http://btc-cognee.apps.compute.lan`
 
 ### Health Check
 
 ```bash
-GET http://localhost:8001/health
+GET /health
 ```
 
 ### Add Document
 
 ```bash
-POST http://localhost:8001/api/v1/add
+POST /api/v1/add
 Content-Type: multipart/form-data
 
 data: @file.md
-datasetName: knowledge-garden
+datasetName: btc-knowledge-garden
 ```
 
 ### Cognify (Build Knowledge Graph)
 
 ```bash
-POST http://localhost:8001/api/v1/cognify
+POST /api/v1/cognify
 Content-Type: application/json
 
 {
-  "datasets": ["knowledge-garden", "btc-patterns"]
+  "datasets": ["btc-knowledge-garden", "btc-patterns"]
 }
 ```
 
 ### Search
 
 ```bash
-POST http://localhost:8001/api/v1/search
+POST /api/v1/search
 Content-Type: application/json
 
 {
   "query": "How do I capture patterns?",
-  "dataset_name": "knowledge-garden"  # Optional
+  "dataset_name": "btc-knowledge-garden"  # Optional
 }
+```
+
+### API Docs
+
+```bash
+open http://btc-cognee.apps.compute.lan/docs
+```
+
+## Deployment
+
+### First Deploy
+
+```bash
+# 1. Copy secrets template and fill in values
+cp .kamal/secrets.example .kamal/secrets
+# edit .kamal/secrets with real values
+
+# 2. Create NFS directories on compute server (one-time)
+ssh root@10.10.20.138 "mkdir -p /mnt/nfs/docker/btc-cognee/{postgres,data}"
+
+# 3. Deploy
+kamal setup -c config/deploy.yml
+
+# 4. Initial data sync
+.claude/scripts/sync-to-cognee.sh
+```
+
+### Subsequent Deploys
+
+```bash
+kamal deploy -c config/deploy.yml
+```
+
+### Check Status
+
+```bash
+.claude/scripts/cognee-local.sh health
+# or
+kamal app details -c config/deploy.yml
 ```
 
 ## Configuration
 
-### Environment Variables
+### Kamal Deploy
 
-See `docker-compose.cognee.yml` (when created):
+See `config/deploy.yml` for full configuration.
 
-```env
-# Database
-COGNEE_DB_PASSWORD=<secure-password>
-COGNEE_NEO4J_PASSWORD=<secure-password>
+Key settings:
+- Service: `btc-cognee`
+- Host: `btc-cognee.apps.compute.lan`
+- DB accessory port: `5433` (avoids collision with muninn-cognee on 5432)
+- NFS volumes: `/mnt/nfs/docker/btc-cognee/`
 
-# OpenAI (required)
-OPENAI_API_KEY=sk-your-key-here
-COGNEE_LLM_MODEL=gpt-4
-COGNEE_EMBEDDING_MODEL=text-embedding-3-small
+### Secrets
 
-# Authentication (disabled for local dev)
-COGNEE_REQUIRE_AUTH=false
-```
-
-### Port Mappings
-
-| Service | Container | Host | Purpose |
-|---------|-----------|------|---------|
-| PostgreSQL | 5432 | 5434 | Vector DB |
-| Redis | 6379 | 6381 | Cache |
-| Neo4j HTTP | 7474 | 7475 | Browser UI |
-| Neo4j Bolt | 7687 | 7688 | Protocol |
-| Cognee API | 8000 | 8001 | REST API |
-
-> Note: Ports differ from second-brain (5433, 6380, 7474, 7687, 8000) to allow concurrent operation.
+Real secrets live in `.kamal/secrets` (gitignored). See `.kamal/secrets.example` for required keys:
+- `KAMAL_REGISTRY_PASSWORD` — Harbor registry password
+- `COGNEE_DB_PASSWORD` — PostgreSQL password
+- `POSTGRES_PASSWORD` — Same as COGNEE_DB_PASSWORD
+- `OPENAI_API_KEY` — OpenAI API key for embeddings
 
 ## Workflows
-
-### Initial Setup
-
-```bash
-# 1. Start Cognee stack
-.claude/scripts/cognee-local.sh up
-
-# 2. Wait for health checks
-.claude/scripts/cognee-local.sh health
-
-# 3. Initial sync via /land
-# Make a change to any .rules/ file, then run:
-/land
-
-# 4. Verify in Neo4j Browser
-open http://localhost:7474
-```
 
 ### Daily Use
 
@@ -264,28 +265,46 @@ open http://localhost:7474
 # Query knowledge
 /query How do I use beads?
 
-# At end of session
-/land  # Auto-formats, syncs to Cognee, captures session
+# At end of session (auto-syncs to Cognee)
+/land
 ```
 
-### Maintenance
+### Sync Knowledge Manually
 
 ```bash
-# View logs
-.claude/scripts/cognee-local.sh logs-api
+# Sync all datasets
+.claude/scripts/sync-to-cognee.sh
+
+# Sync specific dataset
+.claude/scripts/sync-to-cognee.sh knowledge-garden
+.claude/scripts/sync-to-cognee.sh patterns
+.claude/scripts/sync-to-cognee.sh constitution
+
+# Fresh sync (clear + re-upload)
+.claude/scripts/sync-to-cognee.sh --clear
+```
+
+### Check Health
+
+```bash
+.claude/scripts/cognee-local.sh health
+```
+
+## Local Development Fallback
+
+For offline work or testing, a local Docker stack is available:
+
+```bash
+# Requires .claude/docker/.env (copy from .env.example)
+
+# Start local stack
+.claude/scripts/cognee-local.sh --local up
 
 # Check health
-.claude/scripts/cognee-local.sh health
+.claude/scripts/cognee-local.sh --local health
 
-# Backup data
-.claude/scripts/cognee-local.sh backup
-
-# Reset everything
-.claude/scripts/cognee-local.sh clean
-.claude/scripts/cognee-local.sh up
-
-# Re-sync via /land (make change to trigger sync)
-/land
+# Use local endpoint for sync
+.claude/scripts/sync-to-cognee.sh --local
 ```
 
 ## Benefits
@@ -308,50 +327,18 @@ open http://localhost:7474
 - **Pattern application**: Automatically apply established patterns
 - **Continuity**: Pick up where previous sessions left off
 
-## Limitations
-
-### Local Development
-
-- Requires Docker and 4GB+ RAM
-- OpenAI API key required (costs money)
-- Network connectivity for embeddings
-
-### Data Privacy
-
-- Documents sent to OpenAI for embeddings
-- Consider data sensitivity before syncing
-- Use local embeddings for sensitive data (future enhancement)
-
-### Performance
-
-- Initial sync can take minutes for large knowledge bases
-- Search latency ~1-2 seconds
-- Neo4j requires warm-up time after restart
-
-## Future Enhancements
-
-- [ ] Local embeddings (no OpenAI required)
-- [ ] Incremental sync (only changed files)
-- [ ] Auto-sync on file save (file watcher)
-- [ ] Chat interface (/chat command)
-- [ ] Knowledge graph visualization in Obsidian
-- [ ] Agent-to-agent knowledge sharing
-
 ## Troubleshooting
 
-See `.claude/commands/query.md` for query-specific troubleshooting.
-
-**Cognee won't start:**
+**Cognee unreachable:**
 ```bash
-# Check Docker resources
-docker system df
+# Check health endpoint
+curl http://btc-cognee.apps.compute.lan/health
+
+# Check deploy status
+kamal app details -c config/deploy.yml
 
 # View logs
-.claude/scripts/cognee-local.sh logs
-
-# Reset
-.claude/scripts/cognee-local.sh clean
-.claude/scripts/cognee-local.sh up
+kamal app logs -c config/deploy.yml
 ```
 
 **Stale results:**
@@ -360,11 +347,9 @@ docker system df
 /land
 ```
 
-**Slow queries:**
+**Re-deploy after config change:**
 ```bash
-# Check Neo4j memory
-.claude/scripts/cognee-local.sh shell-neo4j
-# CALL dbms.listConfig() YIELD name, value WHERE name STARTS WITH 'dbms.memory'
+kamal deploy -c config/deploy.yml
 ```
 
 ## Related Documentation
@@ -372,5 +357,5 @@ docker system df
 - [Beads Integration](.rules/patterns/beads-integration.md)
 - [/query Command](.claude/commands/query.md)
 - [/land Command](.claude/commands/land.md)
-- [Knowledge Garden](../GARDENING.md)
+- [Kamal Deploy Config](../../config/deploy.yml)
 - [Cognee Docs](https://docs.cognee.ai/)
