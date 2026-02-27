@@ -226,24 +226,21 @@ bd dep add <issue> <depends-on>       # Add dependency
 
 ### Cognee (Semantic Search)
 
-**Repository-Specific Instance:** Each repository has its own isolated Cognee stack.
+**Runs on compute server** — no local Docker required.
 
 ```bash
-# Start second-brain Cognee stack
-.claude/scripts/cognee-local.sh up
-
-# Check health
+# Check health (compute server)
 .claude/scripts/cognee-local.sh health
 
-# Stop stack
-.claude/scripts/cognee-local.sh down
+# Query knowledge
+/query How do I capture patterns?
 
-# View logs
-.claude/scripts/cognee-local.sh logs
+# Manual sync (auto-syncs via /land)
+.claude/scripts/sync-to-cognee.sh
 ```
 
-**Location:** `.claude/docker/` (repository-specific)
-**Containers:** `second-brain-cognee*` (isolated from other projects)
+**Endpoint:** `https://btc-cognee.apps.compute.lan`
+**Deployed via:** `kamal deploy -c config/deploy.yml`
 **Note**: Knowledge garden syncs automatically when you run `/land`.
 
 ### Development
@@ -370,7 +367,7 @@ Semantic search over knowledge garden (`.rules/`, `.claude/`) and session histor
 
 ```bash
 # Standard search
-curl -X POST http://localhost:8001/api/v1/search \
+curl -X POST https://btc-cognee.apps.compute.lan/api/v1/search \
   -H "Content-Type: application/json" \
   -d '{"query": "How does beads integration work?"}'
 
@@ -537,11 +534,8 @@ Requires Docker and OpenAI API key:
 # Complete session (auto-syncs to Cognee)
 /land
 
-# View in Neo4j Browser
-open http://localhost:7474
-
 # API docs
-open http://localhost:8001/docs
+open https://btc-cognee.apps.compute.lan/docs
 ```
 
 See [.rules/architecture/cognee-integration.md](.rules/architecture/cognee-integration.md) for complete architecture.

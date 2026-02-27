@@ -1,0 +1,67 @@
+# Kamal 2 deployment config for Cognee (semantic search + knowledge layer)
+#
+# Deploy:   kamal setup -d cognee     (first time)
+#           kamal deploy -d cognee    (subsequent)
+# Logs:     kamal app logs -d cognee
+# Status:   kamal details -d cognee
+#
+# Slimmed down: API + PostgreSQL/pgvector only (no Neo4j, no Redis).
+# Graph DB uses embedded kuzu — no separate server needed.
+
+service: btc-cognee
+
+image: btc-algo-trading/btc-cognee
+
+proxy:
+  host: btc-cognee.apps.compute.lan
+  app_port: 8000
+  ssl: false
+  forward_headers: true
+  healthcheck:
+    path: /health
+    interval: 5
+    timeout: 30
+
+builder:
+  dockerfile: config/Dockerfile.cognee
+  context: config
+
+env:
+  clear:
+    DB_PROVIDER: postgres
+    DB_HOST: btc-cognee-db
+    DB_PORT: "5432"
+    DB_NAME: cognee
+    DB_USERNAME: cognee
+    VECTOR_DB_PROVIDER: pgvector
+    VECTOR_DB_HOST: btc-cognee-db
+    VECTOR_DB_PORT: "5432"
+    VECTOR_DB_NAME: cognee
+    VECTOR_DB_USERNAME: cognee
+    LLM_MODEL: gpt-4o-mini
+    EMBEDDING_MODEL: text-embedding-3-small
+    EMBEDDING_DIMENSIONS: "1536"
+    GRAPH_DATABASE_PROVIDER: kuzu
+    REQUIRE_AUTHENTICATION: "false"
+    ENABLE_BACKEND_ACCESS_CONTROL: "false"
+  secret:
+    - DB_PASSWORD
+    - VECTOR_DB_PASSWORD
+    - LLM_API_KEY
+
+volumes:
+  - /mnt/nfs/docker/btc-cognee/data:/app/data
+
+accessories:
+  db:
+    image: pgvector/pgvector:pg17
+    host: 10.10.20.138
+    port: "127.0.0.1:5435:5432"
+    env:
+      clear:
+        POSTGRES_USER: cognee
+        POSTGRES_DB: cognee
+      secret:
+        - POSTGRES_PASSWORD
+    volumes:
+      - /mnt/nfs/docker/btc-cognee/postgres:/var/lib/postgresql/data

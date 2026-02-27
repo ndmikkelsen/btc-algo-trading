@@ -7,7 +7,7 @@ description: Query the knowledge garden using Cognee semantic search
 
 Query your knowledge garden using Cognee's semantic search capabilities.
 
-**Last Updated**: 2026-01-26
+**Last Updated**: 2026-02-26
 
 ## Usage
 
@@ -66,14 +66,11 @@ Query your knowledge garden using Cognee's semantic search capabilities.
 
 ## Requirements
 
-Cognee must be running:
+Cognee runs on the compute server — no local Docker needed:
 
 ```bash
-# Check if Cognee is running
-curl http://localhost:8001/health
-
-# If not running, start it
-.claude/scripts/cognee-local.sh up
+# Check Cognee is reachable
+curl https://btc-cognee.apps.compute.lan/health
 
 # Knowledge garden syncs automatically via /land
 ```
@@ -84,14 +81,14 @@ When user invokes `/query <question>`:
 
 1. **Check Cognee availability**:
    ```bash
-   curl -s http://localhost:8001/health
+   curl -s https://btc-cognee.apps.compute.lan/health
    ```
 
-   If not available, tell user to start Cognee.
+   If not available, report that the compute server may be down.
 
 2. **Submit search query**:
    ```bash
-   curl -X POST http://localhost:8001/api/v1/search \
+   curl -X POST https://btc-cognee.apps.compute.lan/api/v1/search \
      -H "Content-Type: application/json" \
      -d "{\"query\": \"<question>\"}"
    ```
@@ -110,7 +107,7 @@ When user invokes `/query <question>`:
 
 By default, searches across all datasets:
 
-- `knowledge-garden` - .claude/ files (commands, patterns, templates)
+- `btc-knowledge-garden` - .claude/ files (commands, patterns, templates)
 - `btc-patterns` - .rules/ files (architecture, technical patterns)
 - `btc-sessions` - Session history from `/land`
 - `btc-constitution` - CONSTITUTION.md, VISION.md, PLAN.md (used with `--with-values`)
@@ -118,11 +115,11 @@ By default, searches across all datasets:
 To search specific dataset:
 
 ```bash
-curl -X POST http://localhost:8001/api/v1/search \
+curl -X POST https://btc-cognee.apps.compute.lan/api/v1/search \
   -H "Content-Type: application/json" \
   -d '{
     "query": "your question",
-    "dataset_name": "knowledge-garden"
+    "dataset_name": "btc-knowledge-garden"
   }'
 ```
 
@@ -142,7 +139,7 @@ curl -X POST http://localhost:8001/api/v1/search \
 
 **Don't use `/query` when:**
 - You know exactly which file to read (just read it)
-- Cognee isn't running (start it first)
+- Cognee isn't reachable (check compute server)
 - Knowledge hasn't been synced yet (run `/land` to sync)
 
 ## Syncing Knowledge
@@ -158,14 +155,11 @@ curl -X POST http://localhost:8001/api/v1/search \
 
 **Cognee not responding:**
 ```bash
-# Check status
-.claude/scripts/cognee-local.sh status
+# Check reachability
+curl https://btc-cognee.apps.compute.lan/health
 
-# Check health
-.claude/scripts/cognee-local.sh health
-
-# View logs
-.claude/scripts/cognee-local.sh logs-api
+# API docs
+open https://btc-cognee.apps.compute.lan/docs
 ```
 
 **Stale results:**
@@ -187,6 +181,5 @@ curl -X POST http://localhost:8001/api/v1/search \
 
 ## Related Documentation
 
-- [Cognee Integration](.rules/architecture/cognee-integration.md) (when created)
+- [Cognee Integration](.rules/architecture/cognee-integration.md)
 - [Knowledge Garden](../GARDENING.md)
-- [Cognee Scripts](.claude/scripts/.md)

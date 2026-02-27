@@ -4,6 +4,31 @@
 
 ## Recent Work
 
+**Session**: 2026-02-26
+**Branch**: feat/migrate-cognee
+**Last Commit**: f6a3205 - chore: sync to-do.md from Dolt beads backend
+
+### Major Milestone: Cognee + Beads Remote Infrastructure Complete
+
+- Deployed btc-cognee to compute server (`btc-cognee.apps.compute.lan`) — semantic search operational
+- Deployed Dolt SQL server (port 3310) as Beads backend — all 8 issues live at `beads_btc-algo-trading`
+- Refactored Kamal config to thin base + destination pattern (deploy.cognee.yml, deploy.dolt.yml)
+- Infrastructure: no local Docker needed for Cognee or Beads — both run remotely
+
+### Architecture Changes
+
+- Kamal deploy config split into base + two destinations (cognee, dolt)
+- Beads now uses Dolt server mode (MySQL @ 10.10.20.138:3310) instead of local SQLite
+- 1Password integration for all secrets; direnv loads BEADS_DOLT_PASSWORD automatically
+
+### Next Major Steps
+
+- Focus on A-S model profitability troubleshooting (P2 backlog)
+- stat_arb model implementation (btc-algo-trading-3ep)
+- All P2 strategy research tasks available in Beads
+
+---
+
 **Session**: 2026-02-21
 **Branch**: feat/mean-reversion-bb
 **Last Commit**: 4528751 - docs: archive MRBB validation results -- NO-GO decision
