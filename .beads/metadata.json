@@ -1,5 +1,10 @@
 {
   "database": "dolt",
   "jsonl_export": "issues.jsonl",
-  "backend": "dolt"
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_server_host": "10.10.20.138",
+  "dolt_server_port": 3310,
+  "dolt_server_user": "beads",
+  "dolt_database": "beads_btc-algo-trading"
 }
