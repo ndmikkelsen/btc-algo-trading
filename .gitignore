@@ -29,6 +29,8 @@ backups/cognee-*
 
 # Kamal secrets (real values — never commit)
 .kamal/secrets
+.kamal/secrets.*
+.kamal/secrets-common
 
 # Land workflow scratchpad
 STICKYNOTE.md
