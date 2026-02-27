@@ -28,7 +28,7 @@ Cognee provides semantic search, knowledge graphs, and AI-powered insights over 
 │                         │                               │
 │  ┌──────────────────────▼──────────────────────────┐    │
 │  │  PostgreSQL + pgvector (btc-algo-trading-cognee-db)          │    │
-│  │  NFS: /mnt/nfs/docker/btc-algo-trading-cognee/postgres       │    │
+│  │  NFS: /mnt/nfs/databases/btc-algo-trading/cognee       │    │
 │  └─────────────────────────────────────────────────┘    │
 └───────────────────────────┬─────────────────────────────┘
                             │
@@ -69,7 +69,7 @@ Cognee provides semantic search, knowledge graphs, and AI-powered insights over 
 - Document storage and metadata
 - Vector embeddings for semantic search
 - Full-text search capabilities
-- NFS-backed persistence at `/mnt/nfs/docker/btc-algo-trading-cognee/`
+- NFS-backed persistence at `/mnt/nfs/databases/btc-algo-trading/cognee/` (db) and `/mnt/nfs/docker/btc-algo-trading-cognee/data/` (app data)
 
 **Cognee API** (`btc-algo-trading-cognee` service)
 - REST API (FastAPI)
@@ -214,7 +214,7 @@ cp .kamal/secrets.example .kamal/secrets
 # edit .kamal/secrets with real values
 
 # 2. Create NFS directories on compute server (one-time)
-ssh root@10.10.20.138 "mkdir -p /mnt/nfs/docker/btc-algo-trading-cognee/{postgres,data}"
+ssh root@10.10.20.138 "mkdir -p /mnt/nfs/databases/btc-algo-trading/cognee /mnt/nfs/docker/btc-algo-trading-cognee/data"
 
 # 3. Deploy
 kamal setup -c config/deploy.yml
@@ -247,7 +247,7 @@ Key settings:
 - Service: `btc-algo-trading-cognee`
 - Host: `btc-algo-trading-cognee.apps.compute.lan`
 - DB accessory port: `5433` (avoids collision with muninn-cognee on 5432)
-- NFS volumes: `/mnt/nfs/docker/btc-algo-trading-cognee/`
+- NFS volumes: `/mnt/nfs/databases/btc-algo-trading/cognee/` (db), `/mnt/nfs/docker/btc-algo-trading-cognee/data/` (app)
 
 ### Secrets
 

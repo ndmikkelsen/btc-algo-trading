@@ -79,4 +79,4 @@ accessories:
       secret:
         - POSTGRES_PASSWORD
     volumes:
-      - /mnt/nfs/docker/btc-algo-trading-cognee/postgres:/var/lib/postgresql/data
+      - /mnt/nfs/databases/btc-algo-trading/cognee:/var/lib/postgresql/data
