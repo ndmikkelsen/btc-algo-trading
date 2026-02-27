@@ -4,14 +4,17 @@ set -euo pipefail
 # Sync knowledge to Cognee
 # BTC Algo Trading Repository
 #
-# Usage: ./sync-to-cognee.sh [--clear] [dataset]
+# Usage: ./sync-to-cognee.sh [--clear] [--local] [dataset]
 #   --clear: Delete and recreate dataset before syncing (fresh upload)
+#   --local: Use local Docker stack (http://localhost:8001) instead of remote
 #   dataset: specific dataset to sync (optional)
 #   If no dataset specified, syncs all datasets
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-COGNEE_API="http://localhost:8001/api/v1"
+
+# Default to remote compute server; --local overrides
+COGNEE_API="${COGNEE_URL:-https://btc-cognee.apps.compute.lan}/api/v1"
 
 # Colors for output
 RED='\033[0;31m'
@@ -26,14 +29,15 @@ log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
 # Get dataset ID by name
 get_dataset_id() {
     local dataset_name="$1"
-    curl -s "$COGNEE_API/datasets" | \
+    curl -sk "$COGNEE_API/datasets" | \
         python3 -c "import sys, json; datasets = json.load(sys.stdin); match = next((d for d in datasets if d['name'] == '$dataset_name'), None); print(match['id'] if match else '')"
 }
 
 # Delete dataset by name
 delete_dataset() {
     local dataset_name="$1"
-    local dataset_id=$(get_dataset_id "$dataset_name")
+    local dataset_id
+    dataset_id=$(get_dataset_id "$dataset_name")
 
     if [ -z "$dataset_id" ]; then
         log_warn "Dataset not found: $dataset_name (will be created on upload)"
@@ -41,17 +45,24 @@ delete_dataset() {
     fi
 
     log_info "Deleting dataset: $dataset_name (ID: $dataset_id)"
-    curl -s -X DELETE "$COGNEE_API/datasets/$dataset_id" > /dev/null
+    curl -sk -X DELETE "$COGNEE_API/datasets/$dataset_id" > /dev/null
     log_info "✓ Deleted: $dataset_name"
 }
 
 # Check if Cognee is running
 check_cognee() {
-    if ! curl -s -f "http://localhost:8001/health" > /dev/null 2>&1; then
-        log_error "Cognee is not running. Start it with: .claude/scripts/cognee-local.sh up"
+    local base_url="${COGNEE_API%/api/v1}"
+    if ! curl -sk -f "${base_url}/health" > /dev/null 2>&1; then
+        log_error "Cognee is not reachable at ${base_url}"
+        if [ "${USE_LOCAL:-false}" = "true" ]; then
+            log_error "Start local stack with: .claude/scripts/cognee-local.sh up"
+        else
+            log_error "Check that btc-cognee.apps.compute.lan is reachable"
+            log_error "Or use --local for the Docker stack"
+        fi
         exit 1
     fi
-    log_info "Cognee is running"
+    log_info "Cognee is reachable at ${base_url}"
 }
 
 # Upload files to dataset
@@ -81,15 +92,13 @@ upload_files() {
         filename=$(basename "$file")
         log_info "  → $filename"
 
-        # Upload file to Cognee
-        curl -s -X POST "$COGNEE_API/add" \
+        curl -sk -X POST "$COGNEE_API/add" \
             -F "data=@$file" \
             -F "datasetName=$dataset_name" > /dev/null
     done
 
     log_info "Processing dataset: $dataset_name"
-    # Cognify using dataset name (not ID)
-    curl -s -X POST "$COGNEE_API/cognify" \
+    curl -sk -X POST "$COGNEE_API/cognify" \
         -H "Content-Type: application/json" \
         -d "{\"datasets\": [\"$dataset_name\"]}" > /dev/null
 
@@ -139,37 +148,14 @@ sync_strategies() {
     log_info "=== Syncing Trading Strategies ==="
 
     files=()
-    # Strategy Python files
     while IFS= read -r -d '' file; do
         files+=("$file")
     done < <(find "$REPO_ROOT/strategies" -name "*.py" -type f -print0 2>/dev/null)
-    # Strategy documentation
     while IFS= read -r -d '' file; do
         files+=("$file")
     done < <(find "$REPO_ROOT/strategies" -name "*.md" -type f -print0 2>/dev/null)
 
     upload_files "btc-strategies" "${files[@]}"
-}
-
-# Sync backtest results
-sync_backtests() {
-    log_info "=== Syncing Backtest Results ==="
-
-    files=()
-    # Backtest markdown reports
-    while IFS= read -r -d '' file; do
-        files+=("$file")
-    done < <(find "$REPO_ROOT/backtests" -name "*.md" -type f -print0 2>/dev/null)
-    # Backtest JSON results (if any)
-    while IFS= read -r -d '' file; do
-        files+=("$file")
-    done < <(find "$REPO_ROOT/backtests" -name "*.json" -type f -print0 2>/dev/null)
-
-    if [ ${#files[@]} -eq 0 ]; then
-        log_warn "No backtest files found"
-        return 0
-    fi
-    upload_files "btc-backtests" "${files[@]}"
 }
 
 # Sync backtest findings
@@ -179,27 +165,35 @@ sync_backtests() {
     files=()
     while IFS= read -r -d '' file; do
         files+=("$file")
-    done < <(find "$REPO_ROOT/backtests/findings" -name "*.md" -type f -print0 2>/dev/null)
+    done < <(find "$REPO_ROOT/backtests" -name "*.md" -type f -print0 2>/dev/null)
+    while IFS= read -r -d '' file; do
+        files+=("$file")
+    done < <(find "$REPO_ROOT/backtests" -name "*.json" -type f -print0 2>/dev/null)
 
     if [ ${#files[@]} -eq 0 ]; then
-        log_warn "No backtest findings found in backtests/findings/"
+        log_warn "No backtest files found in backtests/"
         return 0
     fi
 
-    upload_files "backtest-findings" "${files[@]}"
+    upload_files "btc-backtests" "${files[@]}"
 }
 
 # Main execution
 main() {
     cd "$REPO_ROOT"
-    check_cognee
 
     # Parse flags
     CLEAR_DATASETS=false
+    USE_LOCAL=false
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --clear)
                 CLEAR_DATASETS=true
+                shift
+                ;;
+            --local)
+                USE_LOCAL=true
+                COGNEE_API="http://localhost:8001/api/v1"
                 shift
                 ;;
             *)
@@ -207,10 +201,11 @@ main() {
                 ;;
         esac
     done
-    export CLEAR_DATASETS
+    export CLEAR_DATASETS USE_LOCAL COGNEE_API
+
+    check_cognee
 
     if [ $# -eq 0 ]; then
-        # Sync all datasets
         sync_knowledge_garden
         sync_patterns
         sync_constitution
@@ -218,7 +213,6 @@ main() {
         sync_backtests
         log_info "=== All datasets synced ==="
     else
-        # Sync specific dataset
         case "$1" in
             knowledge-garden|garden)
                 sync_knowledge_garden
@@ -231,9 +225,6 @@ main() {
                 ;;
             strategies)
                 sync_strategies
-                ;;
-            backtests)
-                sync_backtests
                 ;;
             backtests|backtest|findings)
                 sync_backtests

@@ -1,0 +1,52 @@
+# Kamal 2 deployment config for Dolt SQL server (Beads issue tracking backend)
+#
+# Deploy:   kamal setup -d dolt      (first time)
+#           kamal deploy -d dolt     (subsequent)
+# Logs:     kamal app logs -d dolt
+# Status:   kamal details -d dolt
+#
+# This is a per-project Dolt instance (btc-algo-trading).
+# Beads connects via MySQL protocol on port 3310.
+# (3306=flashloaner, 3307=second-brain, 3308=midgard, 3309=compute-stack — 3310 is next available)
+
+service: btc-algo-trading-dolt
+
+image: btc-algo-trading/dolt
+
+servers:
+  web:
+    hosts:
+      - 10.10.20.138
+    options:
+      publish:
+        - 3310:3306
+    proxy: false
+
+registry:
+  server: harbor.compute.lan
+  username: admin
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+ssh:
+  user: compute
+  keys:
+    - ~/.ssh/z3r0Layer-main
+
+builder:
+  arch: amd64
+  dockerfile: .claude/docker/Dockerfile.dolt
+  context: .
+
+env:
+  clear:
+    DOLT_ROOT_HOST: "%"
+    DOLT_DATABASE: beads
+    DOLT_USER: beads
+    DOLT_USER_HOST: "%"
+  secret:
+    - DOLT_ROOT_PASSWORD
+    - DOLT_PASSWORD
+
+volumes:
+  - /mnt/nfs/databases/btc-algo-trading/dolt:/var/lib/dolt
