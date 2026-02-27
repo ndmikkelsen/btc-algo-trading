@@ -1,7 +1,7 @@
 #!/bin/bash
 # Cognee management script — BTC Algo Trading Repository
 #
-# Default: connects to the compute server (btc-cognee.apps.compute.lan)
+# Default: connects to the compute server (btc-algo-trading-cognee.apps.compute.lan)
 # Use --local for the local Docker stack (requires Docker + .env)
 
 set -e
@@ -12,7 +12,7 @@ DOCKER_DIR="$REPO_ROOT/.claude/docker"
 COMPOSE_FILE="$DOCKER_DIR/docker-compose.yml"
 ENV_FILE="$DOCKER_DIR/.env"
 
-REMOTE_URL="https://btc-cognee.apps.compute.lan"
+REMOTE_URL="https://btc-algo-trading-cognee.apps.compute.lan"
 LOCAL_URL="http://localhost:8001"
 
 # Colors
@@ -76,7 +76,7 @@ cmd_remote_health() {
         echo "  API docs: ${REMOTE_URL}/docs"
     else
         echo -e "${RED}✗${NC} Cognee: unreachable"
-        echo "  Check that compute server is up and btc-cognee is deployed"
+        echo "  Check that compute server is up and btc-algo-trading-cognee is deployed"
     fi
 }
 

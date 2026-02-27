@@ -228,14 +228,14 @@ Write session handoff to `STICKYNOTE.md` (local only, gitignored):
 
 ⚠️ **THIS STEP IS MANDATORY — DO NOT SKIP**
 
-Cognee runs on the compute server at `btc-cognee.apps.compute.lan`.
+Cognee runs on the compute server at `btc-algo-trading-cognee.apps.compute.lan`.
 
 ### 8a. Capture Session History
 
 Capture session context to Cognee for searchable history:
 
 ```bash
-COGNEE_URL="${COGNEE_URL:-https://btc-cognee.apps.compute.lan}"
+COGNEE_URL="${COGNEE_URL:-https://btc-algo-trading-cognee.apps.compute.lan}"
 
 # Create session note file
 SESSION_FILE="/tmp/session-$(date +%Y%m%d-%H%M%S).txt"
@@ -286,7 +286,7 @@ fi
 Sync `.claude/` and `.rules/` to Cognee if they changed this session:
 
 ```bash
-COGNEE_URL="${COGNEE_URL:-https://btc-cognee.apps.compute.lan}"
+COGNEE_URL="${COGNEE_URL:-https://btc-algo-trading-cognee.apps.compute.lan}"
 
 # Check if knowledge garden files changed in this session
 GARDEN_CHANGED=$(git diff --name-only origin/dev...HEAD | grep '^\(.claude/\|.rules/\)' || echo "")

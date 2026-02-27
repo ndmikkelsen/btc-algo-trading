@@ -14,7 +14,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # Default to remote compute server; --local overrides
-COGNEE_API="${COGNEE_URL:-https://btc-cognee.apps.compute.lan}/api/v1"
+COGNEE_API="${COGNEE_URL:-https://btc-algo-trading-cognee.apps.compute.lan}/api/v1"
 
 # Colors for output
 RED='\033[0;31m'
@@ -57,7 +57,7 @@ check_cognee() {
         if [ "${USE_LOCAL:-false}" = "true" ]; then
             log_error "Start local stack with: .claude/scripts/cognee-local.sh up"
         else
-            log_error "Check that btc-cognee.apps.compute.lan is reachable"
+            log_error "Check that btc-algo-trading-cognee.apps.compute.lan is reachable"
             log_error "Or use --local for the Docker stack"
         fi
         exit 1
