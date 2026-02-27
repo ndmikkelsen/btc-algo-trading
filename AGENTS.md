@@ -239,7 +239,7 @@ bd dep add <issue> <depends-on>       # Add dependency
 .claude/scripts/sync-to-cognee.sh
 ```
 
-**Endpoint:** `https://btc-cognee.apps.compute.lan`
+**Endpoint:** `https://btc-algo-trading-cognee.apps.compute.lan`
 **Deployed via:** `kamal deploy -c config/deploy.yml`
 **Note**: Knowledge garden syncs automatically when you run `/land`.
 
@@ -367,7 +367,7 @@ Semantic search over knowledge garden (`.rules/`, `.claude/`) and session histor
 
 ```bash
 # Standard search
-curl -X POST https://btc-cognee.apps.compute.lan/api/v1/search \
+curl -X POST https://btc-algo-trading-cognee.apps.compute.lan/api/v1/search \
   -H "Content-Type: application/json" \
   -d '{"query": "How does beads integration work?"}'
 
@@ -535,7 +535,7 @@ Requires Docker and OpenAI API key:
 /land
 
 # API docs
-open https://btc-cognee.apps.compute.lan/docs
+open https://btc-algo-trading-cognee.apps.compute.lan/docs
 ```
 
 See [.rules/architecture/cognee-integration.md](.rules/architecture/cognee-integration.md) for complete architecture.
