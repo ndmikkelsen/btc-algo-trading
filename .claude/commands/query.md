@@ -70,7 +70,7 @@ Cognee runs on the compute server — no local Docker needed:
 
 ```bash
 # Check Cognee is reachable
-curl https://btc-cognee.apps.compute.lan/health
+curl https://btc-algo-trading-cognee.apps.compute.lan/health
 
 # Knowledge garden syncs automatically via /land
 ```
@@ -81,14 +81,14 @@ When user invokes `/query <question>`:
 
 1. **Check Cognee availability**:
    ```bash
-   curl -s https://btc-cognee.apps.compute.lan/health
+   curl -s https://btc-algo-trading-cognee.apps.compute.lan/health
    ```
 
    If not available, report that the compute server may be down.
 
 2. **Submit search query**:
    ```bash
-   curl -X POST https://btc-cognee.apps.compute.lan/api/v1/search \
+   curl -X POST https://btc-algo-trading-cognee.apps.compute.lan/api/v1/search \
      -H "Content-Type: application/json" \
      -d "{\"query\": \"<question>\"}"
    ```
@@ -115,7 +115,7 @@ By default, searches across all datasets:
 To search specific dataset:
 
 ```bash
-curl -X POST https://btc-cognee.apps.compute.lan/api/v1/search \
+curl -X POST https://btc-algo-trading-cognee.apps.compute.lan/api/v1/search \
   -H "Content-Type: application/json" \
   -d '{
     "query": "your question",
@@ -156,10 +156,10 @@ curl -X POST https://btc-cognee.apps.compute.lan/api/v1/search \
 **Cognee not responding:**
 ```bash
 # Check reachability
-curl https://btc-cognee.apps.compute.lan/health
+curl https://btc-algo-trading-cognee.apps.compute.lan/health
 
 # API docs
-open https://btc-cognee.apps.compute.lan/docs
+open https://btc-algo-trading-cognee.apps.compute.lan/docs
 ```
 
 **Stale results:**

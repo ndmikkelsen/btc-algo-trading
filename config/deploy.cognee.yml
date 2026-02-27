@@ -1,40 +1,55 @@
 # Kamal 2 deployment config for Cognee (semantic search + knowledge layer)
 #
-# Deploy:   kamal setup -d cognee     (first time)
-#           kamal deploy -d cognee    (subsequent)
-# Logs:     kamal app logs -d cognee
-# Status:   kamal details -d cognee
+# Deploy:   kamal setup -c config/deploy.cognee.yml     (first time)
+#           kamal deploy -c config/deploy.cognee.yml    (subsequent)
+# Logs:     kamal app logs -c config/deploy.cognee.yml
+# Status:   kamal details -c config/deploy.cognee.yml
 #
 # Slimmed down: API + PostgreSQL/pgvector only (no Neo4j, no Redis).
 # Graph DB uses embedded kuzu — no separate server needed.
 
-service: btc-cognee
+service: btc-algo-trading-cognee
 
-image: btc-algo-trading/btc-cognee
+image: btc-algo-trading/cognee
+
+servers:
+  - 10.10.20.138
+
+registry:
+  server: harbor.compute.lan
+  username: admin
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+ssh:
+  user: compute
+  keys:
+    - ~/.ssh/z3r0Layer-main
 
 proxy:
-  host: btc-cognee.apps.compute.lan
+  host: btc-algo-trading-cognee.apps.compute.lan
   app_port: 8000
   ssl: false
   forward_headers: true
   healthcheck:
     path: /health
     interval: 5
-    timeout: 30
+    timeout: 90
 
 builder:
-  dockerfile: config/Dockerfile.cognee
-  context: config
+  arch: amd64
+  dockerfile: .claude/docker/Dockerfile.cognee
+  context: .
 
 env:
   clear:
     DB_PROVIDER: postgres
-    DB_HOST: btc-cognee-db
+    DB_HOST: btc-algo-trading-cognee-db
     DB_PORT: "5432"
     DB_NAME: cognee
     DB_USERNAME: cognee
     VECTOR_DB_PROVIDER: pgvector
-    VECTOR_DB_HOST: btc-cognee-db
+    VECTOR_DB_HOST: btc-algo-trading-cognee-db
     VECTOR_DB_PORT: "5432"
     VECTOR_DB_NAME: cognee
     VECTOR_DB_USERNAME: cognee
@@ -50,7 +65,7 @@ env:
     - LLM_API_KEY
 
 volumes:
-  - /mnt/nfs/docker/btc-cognee/data:/app/data
+  - /mnt/nfs/docker/btc-algo-trading-cognee/data:/app/data
 
 accessories:
   db:
@@ -64,4 +79,4 @@ accessories:
       secret:
         - POSTGRES_PASSWORD
     volumes:
-      - /mnt/nfs/docker/btc-cognee/postgres:/var/lib/postgresql/data
+      - /mnt/nfs/databases/btc-algo-trading/cognee:/var/lib/postgresql/data

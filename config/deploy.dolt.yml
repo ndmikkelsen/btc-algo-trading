@@ -1,9 +1,9 @@
 # Kamal 2 deployment config for Dolt SQL server (Beads issue tracking backend)
 #
-# Deploy:   kamal setup -d dolt      (first time)
-#           kamal deploy -d dolt     (subsequent)
-# Logs:     kamal app logs -d dolt
-# Status:   kamal details -d dolt
+# Deploy:   kamal setup -c config/deploy.dolt.yml      (first time)
+#           kamal deploy -c config/deploy.dolt.yml     (subsequent)
+# Logs:     kamal app logs -c config/deploy.dolt.yml
+# Status:   kamal details -c config/deploy.dolt.yml
 #
 # This is a per-project Dolt instance (btc-algo-trading).
 # Beads connects via MySQL protocol on port 3310.
@@ -36,7 +36,6 @@ ssh:
 builder:
   arch: amd64
   dockerfile: .claude/docker/Dockerfile.dolt
-  context: .
 
 env:
   clear:

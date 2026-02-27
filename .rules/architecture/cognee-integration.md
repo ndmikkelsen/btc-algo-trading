@@ -20,15 +20,15 @@ Cognee provides semantic search, knowledge graphs, and AI-powered insights over 
                  ▼
 ┌─────────────────────────────────────────────────────────┐
 │           Cognee — Compute Server                        │
-│  btc-cognee.apps.compute.lan                            │
+│  btc-algo-trading-cognee.apps.compute.lan                            │
 │                                                          │
 │  ┌─────────────────────────────────────────────────┐    │
 │  │  Cognee API (FastAPI)                           │    │
 │  └──────────────────────┬──────────────────────────┘    │
 │                         │                               │
 │  ┌──────────────────────▼──────────────────────────┐    │
-│  │  PostgreSQL + pgvector (btc-cognee-db)          │    │
-│  │  NFS: /mnt/nfs/docker/btc-cognee/postgres       │    │
+│  │  PostgreSQL + pgvector (btc-algo-trading-cognee-db)          │    │
+│  │  NFS: /mnt/nfs/databases/btc-algo-trading/cognee       │    │
 │  └─────────────────────────────────────────────────┘    │
 └───────────────────────────┬─────────────────────────────┘
                             │
@@ -65,17 +65,17 @@ Cognee provides semantic search, knowledge graphs, and AI-powered insights over 
 
 **Deployed via Kamal** from `config/deploy.yml`.
 
-**PostgreSQL + pgvector** (`btc-cognee-db` accessory)
+**PostgreSQL + pgvector** (`btc-algo-trading-cognee-db` accessory)
 - Document storage and metadata
 - Vector embeddings for semantic search
 - Full-text search capabilities
-- NFS-backed persistence at `/mnt/nfs/docker/btc-cognee/`
+- NFS-backed persistence at `/mnt/nfs/databases/btc-algo-trading/cognee/` (db) and `/mnt/nfs/docker/btc-algo-trading-cognee/data/` (app data)
 
-**Cognee API** (`btc-cognee` service)
+**Cognee API** (`btc-algo-trading-cognee` service)
 - REST API (FastAPI)
 - Document ingestion and processing
 - Semantic search
-- Accessible at `https://btc-cognee.apps.compute.lan`
+- Accessible at `https://btc-algo-trading-cognee.apps.compute.lan`
 
 ## Data Flow
 
@@ -106,7 +106,7 @@ Cognee provides semantic search, knowledge graphs, and AI-powered insights over 
 1. User runs: /query "How do I capture patterns?"
    │
 2. Claude calls Cognee API:
-   │  POST https://btc-cognee.apps.compute.lan/api/v1/search
+   │  POST https://btc-algo-trading-cognee.apps.compute.lan/api/v1/search
    │  { "query": "How do I capture patterns?" }
    │
 3. Cognee processes query:
@@ -157,7 +157,7 @@ Cognee provides semantic search, knowledge graphs, and AI-powered insights over 
 
 ## API Endpoints
 
-Base URL: `https://btc-cognee.apps.compute.lan`
+Base URL: `https://btc-algo-trading-cognee.apps.compute.lan`
 
 ### Health Check
 
@@ -201,7 +201,7 @@ Content-Type: application/json
 ### API Docs
 
 ```bash
-open https://btc-cognee.apps.compute.lan/docs
+open https://btc-algo-trading-cognee.apps.compute.lan/docs
 ```
 
 ## Deployment
@@ -214,7 +214,7 @@ cp .kamal/secrets.example .kamal/secrets
 # edit .kamal/secrets with real values
 
 # 2. Create NFS directories on compute server (one-time)
-ssh root@10.10.20.138 "mkdir -p /mnt/nfs/docker/btc-cognee/{postgres,data}"
+ssh root@10.10.20.138 "mkdir -p /mnt/nfs/databases/btc-algo-trading/cognee /mnt/nfs/docker/btc-algo-trading-cognee/data"
 
 # 3. Deploy
 kamal setup -c config/deploy.yml
@@ -241,13 +241,13 @@ kamal app details -c config/deploy.yml
 
 ### Kamal Deploy
 
-See `config/deploy.yml` for full configuration.
+See `config/deploy.cognee.yml` for full configuration.
 
 Key settings:
-- Service: `btc-cognee`
-- Host: `btc-cognee.apps.compute.lan`
+- Service: `btc-algo-trading-cognee`
+- Host: `btc-algo-trading-cognee.apps.compute.lan`
 - DB accessory port: `5433` (avoids collision with muninn-cognee on 5432)
-- NFS volumes: `/mnt/nfs/docker/btc-cognee/`
+- NFS volumes: `/mnt/nfs/databases/btc-algo-trading/cognee/` (db), `/mnt/nfs/docker/btc-algo-trading-cognee/data/` (app)
 
 ### Secrets
 
@@ -332,7 +332,7 @@ For offline work or testing, a local Docker stack is available:
 **Cognee unreachable:**
 ```bash
 # Check health endpoint
-curl https://btc-cognee.apps.compute.lan/health
+curl https://btc-algo-trading-cognee.apps.compute.lan/health
 
 # Check deploy status
 kamal app details -c config/deploy.yml

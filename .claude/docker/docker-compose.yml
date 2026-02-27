@@ -1,7 +1,7 @@
 # Cognee AI Memory Layer - BTC Algo Trading Repository (LOCAL FALLBACK)
 #
 # This is a LOCAL DEVELOPMENT FALLBACK stack.
-# The primary Cognee instance runs on the compute server (btc-cognee.apps.compute.lan).
+# The primary Cognee instance runs on the compute server (btc-algo-trading-cognee.apps.compute.lan).
 # Use this only for offline work or local testing.
 #
 # Usage:
