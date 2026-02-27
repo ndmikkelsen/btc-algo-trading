@@ -81,6 +81,25 @@ bd close <id> --reason "Done"         # Complete work
 /land                                  # Complete landing protocol
 ```
 
+## NON-NEGOTIABLE: Kamal Deploy
+
+**ALWAYS use `-c <config-file>`. NEVER use `-d <destination>`.**
+
+```bash
+# ✅ Correct
+kamal setup -c config/deploy.cognee.yml
+kamal deploy -c config/deploy.cognee.yml
+kamal setup -c config/deploy.dolt.yml
+kamal deploy -c config/deploy.dolt.yml
+
+# ❌ NEVER DO THIS — merges configs, causes invisible drift
+kamal deploy -d cognee
+kamal deploy -d dolt
+```
+
+Each service config (`config/deploy.cognee.yml`, `config/deploy.dolt.yml`) is fully self-contained.
+Secrets live in a single `.kamal/secrets` file (see `.kamal/secrets.example`).
+
 ## Core Principles
 
 1. **Use Beads for ALL task tracking** - No markdown TODOs

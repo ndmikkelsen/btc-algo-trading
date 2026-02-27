@@ -1,9 +1,9 @@
 # Kamal 2 deployment config for Cognee (semantic search + knowledge layer)
 #
-# Deploy:   kamal setup -d cognee     (first time)
-#           kamal deploy -d cognee    (subsequent)
-# Logs:     kamal app logs -d cognee
-# Status:   kamal details -d cognee
+# Deploy:   kamal setup -c config/deploy.cognee.yml     (first time)
+#           kamal deploy -c config/deploy.cognee.yml    (subsequent)
+# Logs:     kamal app logs -c config/deploy.cognee.yml
+# Status:   kamal details -c config/deploy.cognee.yml
 #
 # Slimmed down: API + PostgreSQL/pgvector only (no Neo4j, no Redis).
 # Graph DB uses embedded kuzu — no separate server needed.
@@ -11,6 +11,20 @@
 service: btc-cognee
 
 image: btc-algo-trading/btc-cognee
+
+servers:
+  - 10.10.20.138
+
+registry:
+  server: harbor.compute.lan
+  username: admin
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+ssh:
+  user: compute
+  keys:
+    - ~/.ssh/z3r0Layer-main
 
 proxy:
   host: btc-cognee.apps.compute.lan
@@ -23,8 +37,9 @@ proxy:
     timeout: 30
 
 builder:
-  dockerfile: config/Dockerfile.cognee
-  context: config
+  arch: amd64
+  dockerfile: .claude/docker/Dockerfile.cognee
+  context: .
 
 env:
   clear:
