@@ -31,10 +31,11 @@ proxy:
   app_port: 8000
   ssl: false
   forward_headers: true
+  response_timeout: 300
   healthcheck:
     path: /health
     interval: 5
-    timeout: 90
+    timeout: 5
 
 builder:
   arch: amd64
@@ -62,6 +63,8 @@ env:
   secret:
     - DB_PASSWORD
     - VECTOR_DB_PASSWORD
+    - RELATIONAL_DATABASE
+    - VECTOR_DB_URL
     - LLM_API_KEY
 
 volumes:
