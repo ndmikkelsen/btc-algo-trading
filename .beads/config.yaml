@@ -14,6 +14,6 @@ daemon:
 dolt:
   host: 10.10.20.138
   port: 3310
-  database: beads
+  database: beads_btc-algo-trading
   user: beads
   auto-commit: "on"
