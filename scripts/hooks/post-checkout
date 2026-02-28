@@ -1,0 +1,71 @@
+#!/bin/sh
+#
+# post-checkout hook: set up gitignored files in new worktrees
+#
+# Symlinks .envrc and .kamal from the main worktree, and creates
+# .beads/metadata.json with Dolt connection settings so `bd` connects
+# to the remote Dolt backend instead of falling back to localhost defaults.
+#
+# Install: pre-commit install --hook-type post-checkout
+#   (or copy to .git/hooks/post-checkout)
+#
+# Git calls this with: <prev-HEAD> <new-HEAD> <branch-flag>
+# branch-flag = 1 for branch checkouts, 0 for file checkouts
+
+# Only run on branch checkouts
+[ "$3" = "1" ] || exit 0
+
+# Only run in worktrees (git-dir differs from git-common-dir)
+GIT_DIR=$(git rev-parse --git-dir 2>/dev/null) || exit 0
+GIT_COMMON_DIR=$(git rev-parse --git-common-dir 2>/dev/null) || exit 0
+[ "$GIT_DIR" = "$GIT_COMMON_DIR" ] && exit 0
+
+# Resolve paths
+MAIN_ROOT=$(dirname "$GIT_COMMON_DIR")
+WORKTREE_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+
+# 1. Symlink gitignored top-level config files from main worktree
+for ITEM in .envrc .kamal; do
+    SRC="$MAIN_ROOT/$ITEM"
+    DST="$WORKTREE_ROOT/$ITEM"
+    if [ -e "$SRC" ] && [ ! -e "$DST" ]; then
+        ln -sf "$SRC" "$DST"
+        echo "worktree-setup: linked $ITEM from main worktree"
+    fi
+done
+
+# 2. Create .beads/metadata.json with remote Dolt connection settings
+# This activates Dolt mode in bd (vs. SQLite fallback) and points to
+# the correct host/port/user/database from config.yaml
+BEADS_METADATA="$WORKTREE_ROOT/.beads/metadata.json"
+if [ ! -f "$BEADS_METADATA" ] && [ -f "$WORKTREE_ROOT/.beads/config.yaml" ]; then
+    DOLT_HOST=$(grep '^\s*host:' "$WORKTREE_ROOT/.beads/config.yaml" | awk '{print $2}')
+    DOLT_PORT=$(grep '^\s*port:' "$WORKTREE_ROOT/.beads/config.yaml" | awk '{print $2}')
+    DOLT_USER=$(grep '^\s*user:' "$WORKTREE_ROOT/.beads/config.yaml" | awk '{print $2}')
+    DOLT_DB=$(grep '^\s*database:' "$WORKTREE_ROOT/.beads/config.yaml" | awk '{print $2}')
+
+    if [ -n "$DOLT_HOST" ] && [ -n "$DOLT_PORT" ] && [ -n "$DOLT_USER" ] && [ -n "$DOLT_DB" ]; then
+        cat > "$BEADS_METADATA" <<EOF
+{
+  "backend": "dolt",
+  "host": "$DOLT_HOST",
+  "port": $DOLT_PORT,
+  "user": "$DOLT_USER",
+  "database": "$DOLT_DB",
+  "jsonl_export": "issues.jsonl"
+}
+EOF
+        echo "worktree-setup: created .beads/metadata.json (Dolt backend: $DOLT_HOST:$DOLT_PORT/$DOLT_DB)"
+    fi
+fi
+
+# 3. Auto-allow the .envrc symlink for direnv
+# direnv allow hashes are keyed by the symlink path, so each worktree
+# needs its own allow — the main worktree's allow doesn't carry over.
+ENVRC="$WORKTREE_ROOT/.envrc"
+if [ -f "$ENVRC" ] && command -v direnv >/dev/null 2>&1; then
+    direnv allow "$ENVRC" 2>/dev/null
+    echo "worktree-setup: direnv allow'd .envrc"
+fi
+
+exit 0

@@ -1,0 +1,19 @@
+default_install_hook_types:
+  - pre-commit
+  - post-checkout
+
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.0
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      - id: worktree-setup
+        name: Set up gitignored files in new worktrees
+        language: script
+        entry: scripts/hooks/post-checkout
+        stages: [post-checkout]
+        always_run: true
+        pass_filenames: false
