@@ -40,7 +40,7 @@ builder:
 env:
   clear:
     DOLT_ROOT_HOST: "%"
-    DOLT_DATABASE: beads
+    DOLT_DATABASE: beads_btc-algo-trading
     DOLT_USER: beads
     DOLT_USER_HOST: "%"
   secret:
